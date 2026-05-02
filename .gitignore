@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local environment
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local visual QA artifacts
+/course-map-check.png
+/course-map-mobile-check.png
+/video-*.png
+/video-*.mp4
+/video-contact-sheet.png
+/video-input.mp4
