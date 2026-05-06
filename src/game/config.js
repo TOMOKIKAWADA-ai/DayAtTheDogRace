@@ -1,10 +1,10 @@
 export const ASSETS = {
   models: {
     vehicles: [
-      { id: 'car-1', name: 'CAR 001', path: '/assets/models/car.glb' },
-      { id: 'car-2', name: 'CAR 002', path: '/assets/models/car-2.glb' },
-      { id: 'car-3', name: 'CAR 003', path: '/assets/models/car-3.glb' },
-      { id: 'car-4', name: 'CAR 004', path: '/assets/models/car-4.glb' },
+      { id: 'car-1', name: 'CAR 001', path: '/assets/models/car.glb', sideImage: '/assets/ui/cars/car-001-side.png?v=1' },
+      { id: 'car-2', name: 'CAR 002', path: '/assets/models/car-2.glb', sideImage: '/assets/ui/cars/car-002-side.png?v=1' },
+      { id: 'car-3', name: 'CAR 003', path: '/assets/models/car-3.glb', sideImage: '/assets/ui/cars/car-003-side.png?v=1' },
+      { id: 'car-4', name: 'CAR 004', path: '/assets/models/car-4.glb', sideImage: '/assets/ui/cars/car-004-side.png?v=1' },
     ],
     tumbleweed: { id: 'tumbleweed-1', name: 'Tumbleweed', path: '/assets/models/Tumbleweed3.glb' },
     scenery: [

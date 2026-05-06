@@ -20,10 +20,12 @@ This repo is a Three.js + Vite top-down racing game. The user usually writes in 
   - The start/finish material uses PNG alpha (`transparent: true`) so the road shows through transparent areas.
 - Race rules:
   - `RACE_LAPS = 4` in `src/game/RacingGame.js`.
+  - Race start uses a 3-second countdown. `raceStarted` remains false until `GO`, and race/lap timers are reset at release.
+  - Pause is available during countdown and active racing. Keyboard `P` or `Esc`, PS5 `OPTIONS`, and the on-screen pause button toggle it. Race/lap timers are offset by paused duration.
   - Player road max speed is `PLAYER_ROAD_MAX_SPEED = 54`.
   - Rival max speed is `OPPONENT_MAX_SPEED = 0.064`.
   - There are 3 rival cars (`OPPONENT_COUNT = 3`).
-  - `OPPONENT_STARTS` places rivals near the player start and separated so they do not overlap.
+  - `OPPONENT_STARTS` places the front rival on the start/finish line and staggers the rest behind it.
 - Slipstream:
   - Implemented in `getSlipstreamStrength()` in `src/game/RacingGame.js`.
   - Only applies on road, at enough speed, behind a rival, and on straights or mild curves.
@@ -31,6 +33,7 @@ This repo is a Three.js + Vite top-down racing game. The user usually writes in 
 - Vehicle selection:
   - Vehicle list has 4 selectable cars.
   - `CAR 004` uses `public/assets/models/car-4.glb`.
+  - Car selection cards show side-view thumbnails from `public/assets/ui/cars/`.
   - Player/opponent roots stay hidden until car selection finishes, so the blue dummy car is not visible on the selection screen.
   - Course map rival markers are generated from `OPPONENT_COUNT`.
 - Controller input:
@@ -94,6 +97,10 @@ This repo is a Three.js + Vite top-down racing game. The user usually writes in 
 - `public/assets/ui/roadline-center.png`
 - `public/assets/ui/roadline-center-spaced.png`
 - `public/assets/ui/start-finish-line.png`
+- `public/assets/ui/cars/car-001-side.png`
+- `public/assets/ui/cars/car-002-side.png`
+- `public/assets/ui/cars/car-003-side.png`
+- `public/assets/ui/cars/car-004-side.png`
 
 ## Useful Checks
 

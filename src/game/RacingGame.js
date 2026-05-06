@@ -113,6 +113,12 @@ const SLIPSTREAM_MIN_ALIGNMENT = 0.78;
 const SLIPSTREAM_DRAG_REDUCTION = 0.44;
 const SLIPSTREAM_MAX_SPEED_BOOST = 7;
 const SLIPSTREAM_ACCEL = 9.5;
+const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_GO_DISPLAY_SECONDS = 0.72;
+const START_GRID_LANE_OFFSET = 4.7;
+const START_GRID_PROGRESS_SPACING = 0.018;
+const PLAYER_GRID_PROGRESS = 0;
+const PLAYER_GRID_LINE_OFFSET = START_GRID_LANE_OFFSET;
 const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
 const COURSE_MAP_MARKER_MARGIN = 8;
@@ -136,9 +142,9 @@ const OPPONENT_FALLBACK_COLORS = [
 ];
 const OPPONENT_NAMES = ['HAWK', 'B. CARVER', 'DUSTY'];
 const OPPONENT_STARTS = [
-  { progress: 0.018, speed: 0.044, lineBias: 3.4 },
-  { progress: 0.042, speed: 0.042, lineBias: -3.4 },
-  { progress: 0.066, speed: 0.041, lineBias: 0 },
+  { progress: 0, speed: 0.044, lineBias: -START_GRID_LANE_OFFSET },
+  { progress: -START_GRID_PROGRESS_SPACING, speed: 0.042, lineBias: START_GRID_LANE_OFFSET },
+  { progress: -START_GRID_PROGRESS_SPACING * 2, speed: 0.041, lineBias: -START_GRID_LANE_OFFSET },
 ];
 const COURSE_SCENERY_COUNT = 84;
 const COURSE_SCENERY_MODELS = [
@@ -373,6 +379,16 @@ export class RacingGame {
       menuAxis: 0,
       selectionIndex: 0,
     };
+    this.countdown = {
+      active: false,
+      released: false,
+      startedAt: 0,
+      label: '',
+    };
+    this.paused = {
+      active: false,
+      startedAt: 0,
+    };
   }
 
   async start() {
@@ -423,6 +439,7 @@ export class RacingGame {
       .map((vehicle, index) => `
         <button class="car-choice" type="button" data-car-id="${vehicle.id}">
           <span class="car-choice-number">${index + 1}</span>
+          ${vehicle.sideImage ? `<span class="car-choice-visual"><img src="${vehicle.sideImage}" alt="" draggable="false" /></span>` : ''}
           <span class="car-choice-name">${vehicle.name}</span>
         </button>
       `)
@@ -478,6 +495,9 @@ ${opponentMarkers}
             <span class="audio-icon" aria-hidden="true"></span>
           </button>
         </section>
+        <button class="pause-toggle" type="button" data-pause-toggle aria-label="Pause game">
+          <span class="pause-icon" aria-hidden="true"></span>
+        </button>
         <section class="hud" aria-label="race status">
           <h1 class="hud-title">Topdown Racing Mock</h1>
           <div class="hud-grid">
@@ -510,6 +530,12 @@ ${opponentMarkers}
             <h2 class="start-title">Choose Your Car</h2>
             <div class="car-picker" data-car-picker>${vehicleButtons}</div>
           </div>
+        </section>
+        <section class="countdown-screen is-hidden" data-countdown-screen aria-label="race countdown" aria-live="polite">
+          <div class="countdown-value" data-countdown-value>3</div>
+        </section>
+        <section class="pause-screen is-hidden" data-pause-screen aria-label="game paused" aria-live="polite">
+          <div class="pause-title">PAUSED</div>
         </section>
         <section class="finish-screen is-hidden" data-finish-screen aria-label="race results">
           <div class="finish-panel">
@@ -549,6 +575,10 @@ ${opponentMarkers}
       list: this.root.querySelector('[data-position-list]'),
     };
     this.startScreen = this.root.querySelector('[data-start-screen]');
+    this.countdownScreen = this.root.querySelector('[data-countdown-screen]');
+    this.countdownValue = this.root.querySelector('[data-countdown-value]');
+    this.pauseScreen = this.root.querySelector('[data-pause-screen]');
+    this.pauseButton = this.root.querySelector('[data-pause-toggle]');
     this.finishScreen = this.root.querySelector('[data-finish-screen]');
     this.finishStats = {
       total: this.root.querySelector('[data-finish-total]'),
@@ -701,19 +731,22 @@ ${opponentMarkers}
     const normalizedIndex = THREE.MathUtils.euclideanModulo(index, choices.length);
     this.gamepadInput.selectionIndex = normalizedIndex;
     choices.forEach((button, choiceIndex) => {
-      const isFocused = choiceIndex === normalizedIndex && !this.vehicleSelectionLocked && !this.raceStarted;
+      const isFocused = choiceIndex === normalizedIndex
+        && !this.vehicleSelectionLocked
+        && !this.raceStarted
+        && !this.countdown.active;
       button.classList.toggle('is-controller-focus', isFocused);
     });
   }
 
   moveFocusedCarChoice(direction) {
-    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished) return;
+    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished || this.countdown.active) return;
     this.focusCarChoice(this.gamepadInput.selectionIndex + direction);
     this.sfx.playOneShot('uiClick', 0.18, { playbackRate: 1.08 });
   }
 
   selectFocusedCarChoice() {
-    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished) return;
+    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished || this.countdown.active) return;
 
     const vehicle = ASSETS.models.vehicles[this.gamepadInput.selectionIndex];
     if (vehicle) {
@@ -850,15 +883,146 @@ ${opponentMarkers}
     return Array.from({ length: OPPONENT_COUNT }, (_, index) => pool[(startIndex + index) % pool.length]);
   }
 
-  restartRace() {
-    if (!this.raceStarted && !this.raceFinished) return;
-
-    const restartFinishedRace = this.raceFinished;
-    this.reset();
-    if (restartFinishedRace) {
-      this.raceStarted = true;
-      this.clock.getDelta();
+  getPlayerStartPose() {
+    if (!this.track) {
+      return {
+        x: PLAYER_START.x,
+        z: PLAYER_START.z,
+        heading: PLAYER_START.heading,
+        progress: this.track?.getProgress(PLAYER_START.x, PLAYER_START.z) ?? 0,
+        unwrappedProgress: 0,
+      };
     }
+
+    const pose = this.getTrackPose(PLAYER_GRID_PROGRESS);
+    const point = pose.point.clone().addScaledVector(pose.normal, PLAYER_GRID_LINE_OFFSET);
+
+    return {
+      x: point.x,
+      z: point.z,
+      heading: pose.heading,
+      progress: this.track.getProgress(point.x, point.z),
+      unwrappedProgress: PLAYER_GRID_PROGRESS,
+    };
+  }
+
+  setRaceClockStart(now = performance.now()) {
+    if (!this.player) return;
+
+    this.player.raceStartedAt = now;
+    this.player.lapStartedAt = now;
+    this.player.finishedAt = null;
+    this.player.previousForwardSpeed = 0;
+  }
+
+  startRaceCountdown() {
+    const now = performance.now();
+    this.raceStarted = false;
+    this.raceFinished = false;
+    this.countdown.active = true;
+    this.countdown.released = false;
+    this.countdown.startedAt = now;
+    this.countdown.label = '';
+    this.countdownScreen?.classList.remove('is-hidden');
+    this.updatePauseButtonState();
+    this.updateCountdown(now);
+    this.clock.getDelta();
+  }
+
+  releaseCountdownRace(now = performance.now()) {
+    if (this.countdown.released) return;
+
+    this.countdown.released = true;
+    this.raceStarted = true;
+    this.setRaceClockStart(now);
+    this.updatePauseButtonState();
+    this.sfx.playOneShot('checkpointBell', 0.58, { force: true, playbackRate: 1.08 });
+    this.clock.getDelta();
+  }
+
+  finishCountdown() {
+    this.countdown.active = false;
+    this.countdownScreen?.classList.add('is-hidden');
+  }
+
+  updateCountdown(now = performance.now()) {
+    if (!this.countdown.active) return;
+
+    const elapsed = (now - this.countdown.startedAt) / 1000;
+    let label = 'GO';
+
+    if (elapsed < COUNTDOWN_SECONDS) {
+      label = String(Math.ceil(COUNTDOWN_SECONDS - elapsed));
+    } else {
+      this.releaseCountdownRace(now);
+      if (elapsed >= COUNTDOWN_SECONDS + COUNTDOWN_GO_DISPLAY_SECONDS) {
+        this.finishCountdown();
+      }
+    }
+
+    if (label !== this.countdown.label && this.countdownValue) {
+      this.countdown.label = label;
+      this.countdownValue.textContent = label;
+      this.countdownValue.classList.toggle('is-go', label === 'GO');
+    }
+  }
+
+  canTogglePause() {
+    return this.raceStarted || this.countdown.active || this.paused.active;
+  }
+
+  setPausedState(active) {
+    this.paused.active = active;
+    this.pauseScreen?.classList.toggle('is-hidden', !active);
+    this.pauseButton?.classList.toggle('is-paused', active);
+    this.pauseButton?.setAttribute('aria-label', active ? 'Resume game' : 'Pause game');
+    this.updatePauseButtonState();
+  }
+
+  updatePauseButtonState() {
+    const available = this.raceStarted || this.countdown.active || this.paused.active;
+    this.pauseButton?.classList.toggle('is-available', available);
+  }
+
+  pauseRace() {
+    if (!this.canTogglePause() || this.paused.active) return;
+
+    this.paused.startedAt = performance.now();
+    this.setPausedState(true);
+    this.sfx.pauseLoops();
+  }
+
+  resumeRace() {
+    if (!this.paused.active) return;
+
+    const now = performance.now();
+    const pausedDuration = now - this.paused.startedAt;
+    if (this.countdown.active) {
+      this.countdown.startedAt += pausedDuration;
+    }
+    if (this.raceStarted && this.player) {
+      this.player.raceStartedAt += pausedDuration;
+      this.player.lapStartedAt += pausedDuration;
+    }
+
+    this.setPausedState(false);
+    this.clock.getDelta();
+  }
+
+  togglePause() {
+    if (this.paused.active) {
+      this.resumeRace();
+    } else {
+      this.pauseRace();
+    }
+  }
+
+  restartRace() {
+    if (!this.raceStarted && !this.raceFinished && !this.countdown.active) return;
+
+    this.reset();
+    this.setVehiclesVisible(true);
+    this.startRaceCountdown();
   }
 
   getActiveGamepad() {
@@ -915,6 +1079,11 @@ ${opponentMarkers}
     this.gamepadInput.nitro = gamepadButtonValue(gamepad, GAMEPAD_BUTTON.r1) > GAMEPAD_BUTTON_THRESHOLD
       || gamepadButtonValue(gamepad, GAMEPAD_BUTTON.triangle) > GAMEPAD_BUTTON_THRESHOLD;
 
+    if (this.canTogglePause() && this.isGamepadButtonPressed(GAMEPAD_BUTTON.options)) {
+      this.togglePause();
+      return;
+    }
+
     this.handleGamepadMenuActions(stickX);
   }
 
@@ -929,7 +1098,7 @@ ${opponentMarkers}
       return;
     }
 
-    if (this.raceStarted || this.vehicleSelectionLocked) return;
+    if (this.raceStarted || this.vehicleSelectionLocked || this.countdown.active) return;
 
     const dpadDirection = (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadRight) ? 1 : 0)
       + (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadLeft) ? -1 : 0);
@@ -1005,9 +1174,8 @@ ${opponentMarkers}
 
     this.reset();
     this.setVehiclesVisible(true);
-    this.raceStarted = true;
-    this.clock.getDelta();
     this.startScreen?.classList.add('is-hidden');
+    this.startRaceCountdown();
   }
 
   bindEvents() {
@@ -1027,7 +1195,7 @@ ${opponentMarkers}
       const key = normalizeInputKey(event);
       this.keys.set(key, true);
 
-      if (!this.raceStarted && /^[1-9]$/.test(key)) {
+      if (!this.raceStarted && !this.raceFinished && !this.countdown.active && /^[1-9]$/.test(key)) {
         const vehicle = ASSETS.models.vehicles[Number(key) - 1];
         if (vehicle) {
           event.preventDefault();
@@ -1039,7 +1207,12 @@ ${opponentMarkers}
       if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'space'].includes(key)) {
         event.preventDefault();
       }
-      if (key === 'r' && (this.raceStarted || this.raceFinished)) {
+      if ((key === 'p' || key === 'escape') && this.canTogglePause()) {
+        event.preventDefault();
+        this.togglePause();
+        return;
+      }
+      if (key === 'r' && (this.raceStarted || this.raceFinished || this.countdown.active)) {
         event.preventDefault();
         this.restartRace();
       }
@@ -1050,6 +1223,7 @@ ${opponentMarkers}
     };
 
     this.onRestartRace = () => this.restartRace();
+    this.onPauseToggle = () => this.togglePause();
     this.onGamepadConnected = (event) => {
       this.gamepadInput.index = event.gamepad.index;
     };
@@ -1064,6 +1238,7 @@ ${opponentMarkers}
     this.audioToggles?.forEach((audioToggle) => audioToggle.addEventListener('click', this.onAudioToggle));
     this.carPicker?.addEventListener('click', this.onVehiclePick);
     this.restartButton?.addEventListener('click', this.onRestartRace);
+    this.pauseButton?.addEventListener('click', this.onPauseToggle);
     window.addEventListener('keydown', this.onKeyDown, { passive: false });
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('gamepadconnected', this.onGamepadConnected);
@@ -1073,17 +1248,27 @@ ${opponentMarkers}
 
   reset() {
     const now = performance.now();
-    const startProgress = this.track?.getProgress(PLAYER_START.x, PLAYER_START.z) ?? 0;
+    const startPose = this.getPlayerStartPose();
     this.clearSmoke();
     this.clearTumbleweeds();
     this.tumbleweedSpawnTimer = TUMBLEWEED_INITIAL_DELAY;
+    this.countdown.active = false;
+    this.countdown.released = false;
+    this.countdown.label = '';
+    this.paused.active = false;
+    this.paused.startedAt = 0;
     this.raceFinished = false;
+    this.countdownScreen?.classList.add('is-hidden');
+    this.pauseScreen?.classList.add('is-hidden');
+    this.pauseButton?.classList.remove('is-paused');
+    this.pauseButton?.classList.remove('is-available');
+    this.pauseButton?.setAttribute('aria-label', 'Pause game');
     this.finishScreen?.classList.add('is-hidden');
 
     this.player = {
-      x: PLAYER_START.x,
-      z: PLAYER_START.z,
-      heading: PLAYER_START.heading,
+      x: startPose.x,
+      z: startPose.z,
+      heading: startPose.heading,
       vx: 0,
       vz: 0,
       speed: 0,
@@ -1097,9 +1282,9 @@ ${opponentMarkers}
       laps: 0,
       lapStartedAt: now,
       bestLap: Number.NaN,
-      lastProgress: startProgress,
-      unwrappedProgress: startProgress,
-      lapMark: startProgress,
+      lastProgress: startPose.progress,
+      unwrappedProgress: startPose.unwrappedProgress,
+      lapMark: 0,
       surface: 'road',
       slipstream: 0,
     };
@@ -1635,6 +1820,9 @@ ${opponentMarkers}
 
     this.raceStarted = false;
     this.raceFinished = true;
+    this.countdown.active = false;
+    this.setPausedState(false);
+    this.countdownScreen?.classList.add('is-hidden');
     this.player.finishedAt = performance.now();
     this.player.vx = 0;
     this.player.vz = 0;
@@ -2019,8 +2207,11 @@ ${opponentMarkers}
   animate() {
     const delta = Math.min(this.clock.getDelta(), 0.033);
     this.updateGamepadInput();
+    if (!this.paused.active) {
+      this.updateCountdown();
+    }
 
-    if (this.raceStarted) {
+    if (this.raceStarted && !this.paused.active) {
       this.updatePlayer(delta);
       if (this.raceStarted) {
         this.opponents.forEach((opponent) => this.updateOpponent(opponent, delta));
@@ -2050,6 +2241,7 @@ ${opponentMarkers}
     this.audioToggles?.forEach((audioToggle) => audioToggle.removeEventListener('click', this.onAudioToggle));
     this.carPicker?.removeEventListener('click', this.onVehiclePick);
     this.restartButton?.removeEventListener('click', this.onRestartRace);
+    this.pauseButton?.removeEventListener('click', this.onPauseToggle);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('gamepadconnected', this.onGamepadConnected);
