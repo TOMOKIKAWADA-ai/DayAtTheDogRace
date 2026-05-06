@@ -2,29 +2,36 @@ import * as THREE from 'three';
 import { TRACK } from './config.js';
 
 const CENTER_POINTS = [
-  [-70, -132],
-  [-12, -138],
-  [42, -126],
-  [78, -94],
-  [114, -54],
-  [150, -14],
-  [185, 30],
-  [210, 78],
-  [207, 115],
-  [190, 150],
-  [160, 172],
-  [118, 176],
-  [82, 155],
-  [58, 126],
-  [24, 118],
-  [-25, 146],
-  [-70, 138],
-  [-111, 102],
-  [-136, 60],
-  [-145, 18],
-  [-139, -24],
-  [-126, -66],
-  [-105, -105],
+  [-128, -132],
+  [-128, -210],
+  [-130, -306],
+  [-126, -388],
+  [-96, -422],
+  [-56, -414],
+  [-36, -372],
+  [-44, -302],
+  [-18, -250],
+  [24, -256],
+  [54, -322],
+  [92, -338],
+  [122, -298],
+  [122, -218],
+  [136, -154],
+  [160, -96],
+  [172, -28],
+  [178, 42],
+  [204, 92],
+  [188, 136],
+  [142, 168],
+  [88, 158],
+  [46, 126],
+  [0, 128],
+  [-46, 150],
+  [-88, 136],
+  [-122, 96],
+  [-132, 44],
+  [-132, -20],
+  [-128, -72],
 ];
 
 function makeCenterCurve() {
@@ -32,7 +39,7 @@ function makeCenterCurve() {
   return new THREE.CatmullRomCurve3(points, true, 'centripetal');
 }
 
-function createSamples(curve, count = 1200) {
+function createSamples(curve, count = 1800) {
   const samples = [];
   let length = 0;
 
@@ -166,149 +173,141 @@ function createRoadShoulderGeometry(samples, totalLength, roadWidth, shoulderWid
 }
 
 function addStartLine(scene, samples, totalLength) {
-  const blockWidth = 0.78;
-  const blockDepth = TRACK.roadWidth / 8;
   const start = pointAtDistance(samples, totalLength, 0);
-  const white = new THREE.MeshStandardMaterial({ color: 0xf7f6ee, roughness: 0.55 });
-  const black = new THREE.MeshStandardMaterial({ color: 0x111514, roughness: 0.66 });
+  const lineLength = 2.55;
+  const halfLength = lineLength / 2;
+  const halfWidth = TRACK.roadWidth / 2;
+  const lineY = TRACK.roadY + 0.088;
+  const texture = createStartLineTexture();
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.01,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+    depthWrite: false,
+  });
+  const center = start.point.clone();
+  const positions = [];
 
-  for (let row = 0; row < 2; row += 1) {
-    for (let col = 0; col < 8; col += 1) {
-      const material = (row + col) % 2 === 0 ? white : black;
-      const block = new THREE.Mesh(new THREE.BoxGeometry(blockWidth, 0.045, blockDepth), material);
-      const point = start.point
+  for (const tangentSide of [-1, 1]) {
+    for (const normalSide of [-1, 1]) {
+      const point = center
         .clone()
-        .addScaledVector(start.tangent, (row - 0.5) * blockWidth)
-        .addScaledVector(start.normal, (col - 3.5) * blockDepth);
-
-      block.position.set(point.x, TRACK.roadY + 0.058, point.z);
-      block.rotation.y = Math.atan2(start.tangent.x, start.tangent.z);
-      block.receiveShadow = true;
-      scene.add(block);
+        .addScaledVector(start.tangent, tangentSide * halfLength)
+        .addScaledVector(start.normal, normalSide * halfWidth);
+      positions.push(point.x, lineY, point.z);
     }
   }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute([
+    0, 0,
+    1, 0,
+    0, 1,
+    1, 1,
+  ], 2));
+  geometry.setIndex([0, 2, 1, 1, 2, 3]);
+  geometry.computeVertexNormals();
+
+  const line = new THREE.Mesh(geometry, material);
+  line.renderOrder = 4;
+  scene.add(line);
+}
+
+function createStartLineTexture() {
+  const texture = new THREE.TextureLoader().load('/assets/ui/start-finish-line.png?v=2');
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function createRoadLineMaterial(path) {
+  const texture = new THREE.TextureLoader().load(path);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+
+  return new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.02,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
+  });
+}
+
+function createRoadLineStripGeometry(samples, totalLength, offset, width, y, patternLength) {
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const halfWidth = width / 2;
+  const repeatCount = Math.max(1, Math.round(totalLength / patternLength));
+  const stripSamples = [
+    ...samples.map((sample) => ({ ...sample, lineDistance: sample.distance })),
+    { ...samples[0], lineDistance: totalLength },
+  ];
+
+  for (const sample of stripSamples) {
+    const center = sample.point.clone().addScaledVector(sample.normal, offset);
+    const left = center.clone().addScaledVector(sample.normal, -halfWidth);
+    const right = center.clone().addScaledVector(sample.normal, halfWidth);
+    const v = (sample.lineDistance / totalLength) * repeatCount;
+
+    positions.push(left.x, y, left.z, right.x, y, right.z);
+    uvs.push(0, v, 1, v);
+  }
+
+  for (let i = 0; i < stripSamples.length - 1; i += 1) {
+    const left = i * 2;
+    const right = left + 1;
+    const nextLeft = left + 2;
+    const nextRight = left + 3;
+
+    indices.push(left, nextLeft, right, right, nextLeft, nextRight);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return geometry;
 }
 
 function addHighwayLines(scene, samples, totalLength) {
-  const yellowMaterial = new THREE.MeshStandardMaterial({
-    color: 0xc8a13c,
-    roughness: 0.74,
-    emissive: 0x211707,
-  });
-  const whiteMaterial = new THREE.MeshStandardMaterial({
-    color: 0xd8d0bd,
-    roughness: 0.82,
-    emissive: 0x16130f,
-  });
-  const centerGeometry = new THREE.BoxGeometry(0.32, 0.032, 3.9);
-  const edgeGeometry = new THREE.BoxGeometry(0.28, 0.032, 2.8);
-  const spacing = 6.2;
-  const count = Math.floor(totalLength / spacing);
+  const yellowMaterial = createRoadLineMaterial('/assets/ui/roadline-center-spaced.png?v=3');
+  const whiteMaterial = createRoadLineMaterial('/assets/ui/roadline-white.png?v=4');
+  const centerPatchWidth = 0.72;
+  const edgePatchWidth = 2.95;
   const halfWidth = TRACK.roadWidth / 2 - 1.05;
 
-  for (let i = 0; i < count; i += 1) {
-    const base = pointAtDistance(samples, totalLength, i * spacing);
-
-    for (const offset of [-0.46, 0.46]) {
-      const line = new THREE.Mesh(centerGeometry, yellowMaterial);
-      const point = base.point.clone().addScaledVector(base.normal, offset);
-      line.position.set(point.x, TRACK.roadY + 0.062, point.z);
-      line.rotation.y = Math.atan2(base.tangent.x, base.tangent.z);
-      line.receiveShadow = true;
-      scene.add(line);
-    }
-
-    if (i % 2 === 0) {
-      for (const side of [-1, 1]) {
-        const line = new THREE.Mesh(edgeGeometry, whiteMaterial);
-        const point = base.point.clone().addScaledVector(base.normal, side * halfWidth);
-        line.position.set(point.x, TRACK.roadY + 0.064, point.z);
-        line.rotation.y = Math.atan2(base.tangent.x, base.tangent.z);
-        line.receiveShadow = true;
-        scene.add(line);
-      }
-    }
+  for (const offset of [-0.46, 0.46]) {
+    const line = new THREE.Mesh(
+      createRoadLineStripGeometry(samples, totalLength, offset, centerPatchWidth, TRACK.roadY + 0.086, 4.2),
+      yellowMaterial,
+    );
+    line.renderOrder = 3;
+    scene.add(line);
   }
-}
 
-function createCactus(x, z, scale, material) {
-  const cactus = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.42 * scale, 0.55 * scale, 5.2 * scale, 8), material);
-  trunk.position.y = 2.6 * scale;
-  trunk.castShadow = true;
-  cactus.add(trunk);
-
-  const armGeometry = new THREE.CylinderGeometry(0.25 * scale, 0.31 * scale, 2.2 * scale, 8);
   for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(armGeometry, material);
-    arm.position.set(side * 0.92 * scale, 2.95 * scale, 0);
-    arm.rotation.z = side * Math.PI / 2.8;
-    arm.castShadow = true;
-    cactus.add(arm);
-
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.26 * scale, 1.45 * scale, 8), material);
-    tip.position.set(side * 1.72 * scale, 3.5 * scale, 0);
-    tip.castShadow = true;
-    cactus.add(tip);
-  }
-
-  cactus.position.set(x, 0, z);
-  cactus.rotation.y = Math.random() * Math.PI * 2;
-  return cactus;
-}
-
-function isClearOfTrack(samples, totalLength, x, z, clearance = 0) {
-  return nearestTrackPosition(samples, totalLength, x, z).distance > TRACK.roadWidth / 2 + TRACK.shoulderWidth + clearance;
-}
-
-function addScenery(scene, samples, totalLength) {
-  const cactusMaterial = new THREE.MeshStandardMaterial({ color: 0x586339, roughness: 0.96 });
-  const brushMaterial = new THREE.MeshStandardMaterial({ color: 0x625130, roughness: 0.98 });
-  const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x8a7a65, roughness: 0.9 });
-
-  const cactusPositions = [
-    [-174, -104, 0.92],
-    [-178, 106, 0.72],
-    [190, 112, 0.8],
-    [168, -86, 1.04],
-    [-178, 8, 0.62],
-    [186, 24, 0.86],
-    [-12, 138, 0.58],
-    [34, -132, 0.66],
-    [178, 136, 0.68],
-    [-150, -126, 0.76],
-  ];
-
-  for (const [x, z, scale] of cactusPositions) {
-    if (!isClearOfTrack(samples, totalLength, x, z, 8)) continue;
-    scene.add(createCactus(x, z, scale, cactusMaterial));
-  }
-
-  for (let i = 0; i < 44; i += 1) {
-    const angle = (i / 44) * Math.PI * 2 + Math.random() * 0.08;
-    const rx = 96 + Math.random() * 92;
-    const rz = 70 + Math.random() * 58;
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.52 + Math.random() * 1.35), rockMaterial);
-    rock.position.set(Math.cos(angle) * rx, 0.45, Math.sin(angle) * rz);
-    if (!isClearOfTrack(samples, totalLength, rock.position.x, rock.position.z, 4)) continue;
-    rock.rotation.set(i * 0.3, i * 0.18, i * 0.11);
-    rock.castShadow = true;
-    rock.receiveShadow = true;
-    scene.add(rock);
-  }
-
-  const brushGeometry = new THREE.ConeGeometry(0.8, 1.55, 7);
-  for (let i = 0; i < 90; i += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const radiusX = 34 + Math.random() * 155;
-    const radiusZ = 26 + Math.random() * 105;
-    const brush = new THREE.Mesh(brushGeometry, brushMaterial);
-    brush.position.set(Math.cos(angle) * radiusX, 0.78, Math.sin(angle) * radiusZ);
-    if (!isClearOfTrack(samples, totalLength, brush.position.x, brush.position.z, 4)) continue;
-    brush.scale.setScalar(0.65 + Math.random() * 0.9);
-    brush.rotation.set(0, Math.random() * Math.PI * 2, 0.1 - Math.random() * 0.2);
-    brush.castShadow = true;
-    scene.add(brush);
+    const line = new THREE.Mesh(
+      createRoadLineStripGeometry(samples, totalLength, side * halfWidth, edgePatchWidth, TRACK.roadY + 0.084, 2.9),
+      whiteMaterial,
+    );
+    line.renderOrder = 3;
+    scene.add(line);
   }
 }
 
@@ -341,7 +340,7 @@ function nearestTrackPosition(samples, totalLength, x, z) {
 export function createTrack(scene, textures) {
   const grassMaterial = new THREE.MeshStandardMaterial({
     map: textures.grass,
-    color: 0xb0946a,
+    color: 0xffffff,
     roughness: 0.96,
   });
   const roadMaterial = new THREE.MeshStandardMaterial({
@@ -359,7 +358,7 @@ export function createTrack(scene, textures) {
     side: THREE.DoubleSide,
   });
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(680, 620, 1, 1), grassMaterial);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(760, 1020, 1, 1), grassMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
@@ -380,7 +379,6 @@ export function createTrack(scene, textures) {
 
   addHighwayLines(scene, samples, totalLength);
   addStartLine(scene, samples, totalLength);
-  addScenery(scene, samples, totalLength);
 
   return {
     centerPoint(progress) {

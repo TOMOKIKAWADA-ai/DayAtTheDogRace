@@ -42,6 +42,33 @@ function normalizeInputKey(event) {
   return event.code === 'Space' ? 'space' : event.key.toLowerCase();
 }
 
+function applyGamepadDeadzone(value, deadzone = 0.18) {
+  const magnitude = Math.abs(value);
+  if (magnitude < deadzone) return 0;
+  return Math.sign(value) * ((magnitude - deadzone) / (1 - deadzone));
+}
+
+function gamepadButtonValue(gamepad, index) {
+  const button = gamepad?.buttons?.[index];
+  if (typeof button === 'number') return button;
+  return button?.value ?? (button?.pressed ? 1 : 0);
+}
+
+const GAMEPAD_BUTTON = {
+  cross: 0,
+  circle: 1,
+  square: 2,
+  triangle: 3,
+  r1: 5,
+  l2: 6,
+  r2: 7,
+  options: 9,
+  dpadLeft: 14,
+  dpadRight: 15,
+};
+const GAMEPAD_TRIGGER_THRESHOLD = 0.08;
+const GAMEPAD_BUTTON_THRESHOLD = 0.45;
+
 const VEHICLE_COLLISION_RADIUS = 4.6 * VEHICLE_GRAPHIC_SCALE;
 const ROAD_GRIP = 7.4;
 const DRIFT_GRIP = 0.75;
@@ -52,9 +79,9 @@ const DESERT_DEEP_DRAG = 2.35;
 const DESERT_EDGE_MAX_SPEED = 16;
 const DESERT_DEEP_MAX_SPEED = 10;
 const DESERT_DEPTH_FOR_FULL_SLOWDOWN = 18;
-const OPPONENT_MAX_SPEED = 0.074;
-const OPPONENT_MIN_CORNER_SPEED = 0.022;
-const OPPONENT_COUNT = 2;
+const OPPONENT_MAX_SPEED = 0.064;
+const OPPONENT_MIN_CORNER_SPEED = 0.019;
+const OPPONENT_COUNT = 3;
 const OPPONENT_OUTSIDE_LINE_OFFSET = TRACK.roadWidth * 0.2;
 const OPPONENT_INSIDE_LINE_OFFSET = TRACK.roadWidth * 0.18;
 const OPPONENT_LINE_SHIFT_SPEED = 4.8;
@@ -71,10 +98,21 @@ const ROAD_SURFACE_RELEASE_MARGIN = 0.6;
 const THROTTLE_UNDERSTEER_STRENGTH = 0.72;
 const DECEL_TURN_IN_STRENGTH = 0.72;
 const LIFT_OFF_LOAD_FACTOR = 0.58;
-const RACE_LAPS = 6;
+const RACE_LAPS = 4;
+const PLAYER_ROAD_MAX_SPEED = 54;
 const NITRO_ACCEL = 48;
 const NITRO_DRAIN_RATE = 0.14;
-const NITRO_MAX_SPEED_BOOST = 18;
+const NITRO_MAX_SPEED_BOOST = 22;
+const SLIPSTREAM_MIN_SPEED = 15;
+const SLIPSTREAM_MIN_DISTANCE = 6;
+const SLIPSTREAM_MAX_DISTANCE = 36;
+const SLIPSTREAM_MAX_LATERAL_DISTANCE = 8.5;
+const SLIPSTREAM_TURN_FADE_START = 0.055;
+const SLIPSTREAM_TURN_FADE_END = 0.15;
+const SLIPSTREAM_MIN_ALIGNMENT = 0.78;
+const SLIPSTREAM_DRAG_REDUCTION = 0.44;
+const SLIPSTREAM_MAX_SPEED_BOOST = 7;
+const SLIPSTREAM_ACCEL = 9.5;
 const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
 const COURSE_MAP_MARKER_MARGIN = 8;
@@ -87,19 +125,88 @@ const TUMBLEWEED_DESPAWN_DISTANCE = 175;
 const TUMBLEWEED_MIN_SPEED = 18;
 const TUMBLEWEED_MAX_SPEED = 27;
 const TUMBLEWEED_INITIAL_DELAY = 0.35;
+const TUMBLEWEED_MIN_BOUNCE_HEIGHT = 0.42;
+const TUMBLEWEED_MAX_BOUNCE_HEIGHT = 0.92;
+const TUMBLEWEED_MIN_BOUNCE_RATE = 8.5;
+const TUMBLEWEED_MAX_BOUNCE_RATE = 12.5;
 const OPPONENT_FALLBACK_COLORS = [
   { body: 0xf5c542, accent: 0x5a3814 },
   { body: 0x20201d, accent: 0xd8d0bd },
+  { body: 0xb8c1c7, accent: 0x313942 },
 ];
-const OPPONENT_NAMES = ['HAWK', 'B. CARVER'];
+const OPPONENT_NAMES = ['HAWK', 'B. CARVER', 'DUSTY'];
 const OPPONENT_STARTS = [
-  { progress: 0.47, speed: 0.056, lineBias: 0.22 },
-  { progress: 0.56, speed: 0.053, lineBias: -0.22 },
+  { progress: 0.018, speed: 0.044, lineBias: 3.4 },
+  { progress: 0.042, speed: 0.042, lineBias: -3.4 },
+  { progress: 0.066, speed: 0.041, lineBias: 0 },
+];
+const COURSE_SCENERY_COUNT = 84;
+const COURSE_SCENERY_MODELS = [
+  { modelId: 'plants-01', minHeight: 1.55, maxHeight: 2.25, minOffset: 3.5, maxOffset: 12, tangentJitter: 6 },
+  { modelId: 'stone-01', minHeight: 0.76, maxHeight: 1.12, minOffset: 4.5, maxOffset: 13, tangentJitter: 5 },
+  { modelId: 'plants-02', minHeight: 1.45, maxHeight: 2.15, minOffset: 4, maxOffset: 13, tangentJitter: 6 },
+  { modelId: 'stone-02', minHeight: 0.82, maxHeight: 1.2, minOffset: 5, maxOffset: 14, tangentJitter: 5 },
+  { modelId: 'cactus-01', minHeight: 3.55, maxHeight: 5.1, minOffset: 8, maxOffset: 18, tangentJitter: 7 },
+  { modelId: 'stone-03', minHeight: 0.92, maxHeight: 1.32, minOffset: 5, maxOffset: 15, tangentJitter: 5 },
+  { modelId: 'plants-01', minHeight: 1.45, maxHeight: 2.05, minOffset: 3.5, maxOffset: 11, tangentJitter: 6 },
+  { modelId: 'cactus-02', minHeight: 5.7, maxHeight: 7.5, minOffset: 11, maxOffset: 23, tangentJitter: 8 },
+  { modelId: 'plants-02', minHeight: 1.55, maxHeight: 2.35, minOffset: 4.5, maxOffset: 14, tangentJitter: 6 },
+  { modelId: 'stone-01', minHeight: 0.74, maxHeight: 1.06, minOffset: 5, maxOffset: 13, tangentJitter: 5 },
+  { modelId: 'plants-01', minHeight: 1.6, maxHeight: 2.4, minOffset: 4, maxOffset: 13, tangentJitter: 6 },
+  { modelId: 'stone-02', minHeight: 0.78, maxHeight: 1.14, minOffset: 5, maxOffset: 14, tangentJitter: 5 },
+];
+const BACKGROUND_SCENERY_PLACEMENTS = [
+  { modelId: 'cactus-02', x: -216, z: -118, height: 7.6, rotation: 0.35 },
+  { modelId: 'cactus-02', x: 238, z: -74, height: 6.9, rotation: -0.6 },
+  { modelId: 'cactus-02', x: 236, z: 124, height: 7.25, rotation: 1.2 },
+  { modelId: 'cactus-02', x: 4, z: -214, height: 6.45, rotation: 1.8 },
+  { modelId: 'cactus-01', x: -224, z: 78, height: 4.3, rotation: -1.2 },
+  { modelId: 'cactus-01', x: 126, z: 226, height: 4.85, rotation: 0.7 },
+  { modelId: 'cactus-01', x: -98, z: 218, height: 3.95, rotation: 2.1 },
+  { modelId: 'cactus-01', x: 264, z: 18, height: 4.45, rotation: 2.7 },
+  { modelId: 'plants-01', x: -58, z: 86, height: 2.15, rotation: 0.1 },
+  { modelId: 'plants-01', x: 98, z: 88, height: 1.85, rotation: 1.9 },
+  { modelId: 'plants-01', x: -186, z: -10, height: 2.35, rotation: -0.7 },
+  { modelId: 'plants-01', x: 188, z: -126, height: 2.05, rotation: 2.4 },
+  { modelId: 'plants-01', x: -238, z: 150, height: 1.95, rotation: -2.6 },
+  { modelId: 'plants-01', x: 274, z: -132, height: 2.2, rotation: 0.8 },
+  { modelId: 'plants-02', x: 22, z: 84, height: 2.05, rotation: -1.5 },
+  { modelId: 'plants-02', x: 124, z: -114, height: 2.3, rotation: 0.55 },
+  { modelId: 'plants-02', x: -172, z: -158, height: 1.9, rotation: 2.85 },
+  { modelId: 'plants-02', x: 194, z: 200, height: 2.45, rotation: -0.3 },
+  { modelId: 'plants-02', x: -282, z: -38, height: 2.1, rotation: 1.35 },
+  { modelId: 'plants-02', x: 276, z: 98, height: 1.8, rotation: -2.15 },
+  { modelId: 'stone-01', x: -112, z: 54, height: 1.05, rotation: 0.4 },
+  { modelId: 'stone-01', x: 52, z: -176, height: 0.86, rotation: 1.2 },
+  { modelId: 'stone-01', x: -254, z: -142, height: 1.18, rotation: -0.8 },
+  { modelId: 'stone-01', x: 234, z: 174, height: 0.92, rotation: 2.2 },
+  { modelId: 'stone-02', x: 72, z: 34, height: 1.22, rotation: -2.1 },
+  { modelId: 'stone-02', x: -30, z: 184, height: 0.98, rotation: 0.9 },
+  { modelId: 'stone-02', x: 214, z: 38, height: 1.12, rotation: 2.75 },
+  { modelId: 'stone-02', x: -206, z: 114, height: 0.9, rotation: -1.65 },
+  { modelId: 'stone-03', x: -42, z: -184, height: 1.28, rotation: 1.7 },
+  { modelId: 'stone-03', x: 154, z: 214, height: 1.08, rotation: -0.2 },
+  { modelId: 'stone-03', x: 284, z: -24, height: 1.36, rotation: -2.7 },
+  { modelId: 'stone-03', x: -286, z: 106, height: 1.16, rotation: 0.65 },
 ];
 
 function smoothStep(edge0, edge1, value) {
   const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function createSeededRandom(seed) {
+  return () => {
+    seed |= 0;
+    seed = seed + 0x6d2b79f5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function randomRange(random, min, max) {
+  return min + random() * (max - min);
 }
 
 function createSmokeTexture() {
@@ -177,6 +284,32 @@ function prepareTumbleweedVisual(model) {
   return visual;
 }
 
+function prepareStaticSceneryPrototype(model) {
+  const prototype = new THREE.Group();
+  const visual = model.clone(true);
+
+  enableObjectShadows(visual);
+  visual.traverse((child) => {
+    if (child.isMesh) {
+      child.material = Array.isArray(child.material)
+        ? child.material.map((material) => removeMaterialGloss(material))
+        : removeMaterialGloss(child.material);
+    }
+  });
+
+  visual.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(visual);
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  visual.position.x -= center.x;
+  visual.position.y -= bounds.min.y;
+  visual.position.z -= center.z;
+  prototype.add(visual);
+  prototype.userData.sourceHeight = size.y || 1;
+
+  return prototype;
+}
+
 function createFallbackTumbleweedVisual() {
   const visual = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({
@@ -214,6 +347,7 @@ export class RacingGame {
     this.smokeEmitAccumulator = 0;
     this.tumbleweeds = [];
     this.tumbleweedPrototype = null;
+    this.backgroundSceneryRoot = null;
     this.tumbleweedSpawnTimer = TUMBLEWEED_INITIAL_DELAY;
     this.raceStarted = false;
     this.raceFinished = false;
@@ -227,6 +361,17 @@ export class RacingGame {
     this.sfx = new GameAudio(ASSETS.audio.sfx);
     this.drivingAudio = {
       throttleHeld: false,
+    };
+    this.gamepadInput = {
+      index: null,
+      buttons: new Map(),
+      previousButtons: new Map(),
+      steer: 0,
+      throttle: 0,
+      brake: 0,
+      nitro: false,
+      menuAxis: 0,
+      selectionIndex: 0,
     };
   }
 
@@ -264,7 +409,10 @@ export class RacingGame {
     this.createCourseMap();
 
     this.createVehicles();
-    await this.loadTumbleweedModel();
+    await Promise.all([
+      this.loadTumbleweedModel(),
+      this.loadBackgroundScenery(),
+    ]);
     this.reset();
     this.resize();
     this.animate();
@@ -279,6 +427,11 @@ export class RacingGame {
         </button>
       `)
       .join('');
+    const opponentMarkers = Array.from({ length: OPPONENT_COUNT }, (_, index) => `
+            <g class="course-map-marker course-map-marker-opponent" data-map-opponent="${index}">
+              <path d="M 0 -5 L 4.5 6 L 0 3 L -4.5 6 Z"></path>
+            </g>
+    `).join('');
 
     this.root.innerHTML = `
       <main class="game-shell">
@@ -303,12 +456,7 @@ export class RacingGame {
             <path class="course-map-runoff" data-map-runoff></path>
             <path class="course-map-road" data-map-road></path>
             <path class="course-map-center" data-map-center></path>
-            <g class="course-map-marker course-map-marker-opponent" data-map-opponent="0">
-              <path d="M 0 -5 L 4.5 6 L 0 3 L -4.5 6 Z"></path>
-            </g>
-            <g class="course-map-marker course-map-marker-opponent" data-map-opponent="1">
-              <path d="M 0 -5 L 4.5 6 L 0 3 L -4.5 6 Z"></path>
-            </g>
+${opponentMarkers}
             <g class="course-map-marker course-map-marker-player" data-map-player>
               <path d="M 0 -6.5 L 5 7 L 0 3.5 L -5 7 Z"></path>
             </g>
@@ -353,6 +501,7 @@ export class RacingGame {
           W/S or arrow keys: throttle / brake<br />
           A/D or arrow keys: steer<br />
           Space: nitro<br />
+          PS5 pad: LS steer / R2 gas / L2 brake / R1 nitro<br />
           R: restart
         </aside>
         <section class="start-screen" data-start-screen aria-label="car selection">
@@ -371,7 +520,7 @@ export class RacingGame {
               <span>Best <strong data-finish-best>--</strong></span>
               <span>Nitro <strong data-finish-nitro>--</strong></span>
             </div>
-            <p class="finish-action">Press R to race again</p>
+            <button class="finish-action" type="button" data-restart-race>Race Again</button>
           </div>
         </section>
         <div class="asset-status" data-assets>loading local assets...</div>
@@ -406,7 +555,10 @@ export class RacingGame {
       best: this.root.querySelector('[data-finish-best]'),
       nitro: this.root.querySelector('[data-finish-nitro]'),
     };
+    this.restartButton = this.root.querySelector('[data-restart-race]');
     this.carPicker = this.root.querySelector('[data-car-picker]');
+    this.carChoices = [...this.root.querySelectorAll('[data-car-id]')];
+    this.focusCarChoice(this.gamepadInput.selectionIndex);
     this.audioToggles = [...this.root.querySelectorAll('[data-audio-toggle]')];
   }
 
@@ -435,10 +587,10 @@ export class RacingGame {
     sun.position.set(-38, 72, -46);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -215;
-    sun.shadow.camera.right = 215;
-    sun.shadow.camera.top = 165;
-    sun.shadow.camera.bottom = -165;
+    sun.shadow.camera.left = -285;
+    sun.shadow.camera.right = 285;
+    sun.shadow.camera.top = 245;
+    sun.shadow.camera.bottom = -510;
     sun.shadow.camera.near = 10;
     sun.shadow.camera.far = 300;
     this.scene.add(sun);
@@ -518,6 +670,7 @@ export class RacingGame {
     this.playerRoot = new THREE.Group();
     this.playerVisual = createFallbackCar(0x2d8cff, 0x172235);
     this.playerRoot.add(this.playerVisual);
+    this.playerRoot.visible = false;
     this.scene.add(this.playerRoot);
 
     this.opponentRoots = [];
@@ -527,9 +680,44 @@ export class RacingGame {
       const colors = OPPONENT_FALLBACK_COLORS[i % OPPONENT_FALLBACK_COLORS.length];
       const visual = createFallbackCar(colors.body, colors.accent);
       root.add(visual);
+      root.visible = false;
       this.scene.add(root);
       this.opponentRoots.push(root);
       this.opponentVisuals.push(visual);
+    }
+  }
+
+  setVehiclesVisible(visible) {
+    if (this.playerRoot) this.playerRoot.visible = visible;
+    this.opponentRoots?.forEach((root) => {
+      root.visible = visible;
+    });
+  }
+
+  focusCarChoice(index) {
+    const choices = this.carChoices ?? [];
+    if (choices.length === 0) return;
+
+    const normalizedIndex = THREE.MathUtils.euclideanModulo(index, choices.length);
+    this.gamepadInput.selectionIndex = normalizedIndex;
+    choices.forEach((button, choiceIndex) => {
+      const isFocused = choiceIndex === normalizedIndex && !this.vehicleSelectionLocked && !this.raceStarted;
+      button.classList.toggle('is-controller-focus', isFocused);
+    });
+  }
+
+  moveFocusedCarChoice(direction) {
+    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished) return;
+    this.focusCarChoice(this.gamepadInput.selectionIndex + direction);
+    this.sfx.playOneShot('uiClick', 0.18, { playbackRate: 1.08 });
+  }
+
+  selectFocusedCarChoice() {
+    if (this.vehicleSelectionLocked || this.raceStarted || this.raceFinished) return;
+
+    const vehicle = ASSETS.models.vehicles[this.gamepadInput.selectionIndex];
+    if (vehicle) {
+      this.selectVehicle(vehicle);
     }
   }
 
@@ -575,11 +763,208 @@ export class RacingGame {
     this.updateAssetStatus();
   }
 
+  async loadBackgroundScenery() {
+    const sceneryAssets = ASSETS.models.scenery ?? [];
+    if (sceneryAssets.length === 0) return;
+
+    const loadedAssets = await Promise.all(sceneryAssets.map(async (asset) => {
+      try {
+        return [asset.id, await loadGltfScene(asset.path)];
+      } catch {
+        return null;
+      }
+    }));
+    const prototypesById = new Map(
+      loadedAssets
+        .filter(Boolean)
+        .map(([id, model]) => [id, prepareStaticSceneryPrototype(model)]),
+    );
+    const placements = [
+      ...BACKGROUND_SCENERY_PLACEMENTS,
+      ...this.createCourseSceneryPlacements(),
+    ];
+    const root = new THREE.Group();
+    root.name = 'background-scenery';
+
+    let added = 0;
+    for (const placement of placements) {
+      const prototype = prototypesById.get(placement.modelId);
+      if (!prototype || this.track?.isOnRoad(placement.x, placement.z)) continue;
+
+      const visual = prototype.clone(true);
+      visual.scale.setScalar(placement.height / prototype.userData.sourceHeight);
+      const anchor = new THREE.Group();
+      anchor.position.set(placement.x, TRACK.roadY, placement.z);
+      anchor.rotation.set(0, placement.rotation, 0);
+      anchor.add(visual);
+      root.add(anchor);
+      added += 1;
+    }
+
+    if (added > 0) {
+      this.backgroundSceneryRoot = root;
+      this.scene.add(root);
+      this.assetMessages.push(`scenery: ${added} GLB objects (${prototypesById.size}/${sceneryAssets.length} models)`);
+    } else {
+      this.assetMessages.push('scenery: unavailable');
+    }
+
+    this.updateAssetStatus();
+  }
+
+  createCourseSceneryPlacements() {
+    if (!this.track) return [];
+
+    const random = createSeededRandom(0x6561676c);
+    const placements = [];
+    const roadEdgeDistance = TRACK.roadWidth / 2 + TRACK.shoulderWidth;
+
+    for (let i = 0; i < COURSE_SCENERY_COUNT; i += 1) {
+      const model = COURSE_SCENERY_MODELS[i % COURSE_SCENERY_MODELS.length];
+      const side = i % 4 < 2 ? 1 : -1;
+      const progress = THREE.MathUtils.euclideanModulo((i + randomRange(random, -0.18, 0.18)) / COURSE_SCENERY_COUNT, 1);
+      const pose = this.getTrackPose(progress);
+      const distance = roadEdgeDistance + randomRange(random, model.minOffset, model.maxOffset);
+      const tangentOffset = randomRange(random, -model.tangentJitter, model.tangentJitter);
+      const point = pose.point
+        .clone()
+        .addScaledVector(pose.normal, side * distance)
+        .addScaledVector(pose.tangent, tangentOffset);
+
+      placements.push({
+        modelId: model.modelId,
+        x: point.x,
+        z: point.z,
+        height: randomRange(random, model.minHeight, model.maxHeight),
+        rotation: pose.heading + randomRange(random, -1.35, 1.35),
+      });
+    }
+
+    return placements;
+  }
+
   pickOpponentVehicles(selectedVehicle) {
     const alternatives = ASSETS.models.vehicles.filter((vehicle) => vehicle.id !== selectedVehicle.id);
     const pool = alternatives.length > 0 ? alternatives : ASSETS.models.vehicles;
     const startIndex = Math.floor(Math.random() * pool.length);
     return Array.from({ length: OPPONENT_COUNT }, (_, index) => pool[(startIndex + index) % pool.length]);
+  }
+
+  restartRace() {
+    if (!this.raceStarted && !this.raceFinished) return;
+
+    const restartFinishedRace = this.raceFinished;
+    this.reset();
+    if (restartFinishedRace) {
+      this.raceStarted = true;
+      this.clock.getDelta();
+    }
+  }
+
+  getActiveGamepad() {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return null;
+
+    const gamepads = Array.from(navigator.getGamepads());
+    const currentGamepad = this.gamepadInput.index !== null ? gamepads[this.gamepadInput.index] : null;
+    if (currentGamepad?.connected) return currentGamepad;
+
+    return gamepads.find((gamepad) => gamepad?.connected && (
+      gamepad.mapping === 'standard'
+      || /dualsense|dualshock|wireless controller|playstation|ps5/i.test(gamepad.id)
+    )) ?? gamepads.find((gamepad) => gamepad?.connected) ?? null;
+  }
+
+  isGamepadButtonPressed(buttonIndex) {
+    return Boolean(this.gamepadInput.buttons.get(buttonIndex))
+      && !this.gamepadInput.previousButtons.get(buttonIndex);
+  }
+
+  updateGamepadInput() {
+    const gamepad = this.getActiveGamepad();
+    this.gamepadInput.previousButtons = this.gamepadInput.buttons;
+    this.gamepadInput.buttons = new Map();
+    this.gamepadInput.steer = 0;
+    this.gamepadInput.throttle = 0;
+    this.gamepadInput.brake = 0;
+    this.gamepadInput.nitro = false;
+
+    if (!gamepad) {
+      this.gamepadInput.index = null;
+      this.gamepadInput.menuAxis = 0;
+      return;
+    }
+
+    this.gamepadInput.index = gamepad.index;
+    Array.from(gamepad.buttons).forEach((_, index) => {
+      this.gamepadInput.buttons.set(index, gamepadButtonValue(gamepad, index) > GAMEPAD_BUTTON_THRESHOLD);
+    });
+
+    const stickX = applyGamepadDeadzone(gamepad.axes?.[0] ?? 0);
+    const dpadSteer = (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadLeft) ? 1 : 0)
+      + (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadRight) ? -1 : 0);
+    this.gamepadInput.steer = dpadSteer || -stickX;
+    this.gamepadInput.throttle = Math.max(
+      gamepadButtonValue(gamepad, GAMEPAD_BUTTON.r2),
+      gamepadButtonValue(gamepad, GAMEPAD_BUTTON.cross),
+    );
+    this.gamepadInput.brake = Math.max(
+      gamepadButtonValue(gamepad, GAMEPAD_BUTTON.l2),
+      gamepadButtonValue(gamepad, GAMEPAD_BUTTON.circle),
+      gamepadButtonValue(gamepad, GAMEPAD_BUTTON.square),
+    );
+    this.gamepadInput.nitro = gamepadButtonValue(gamepad, GAMEPAD_BUTTON.r1) > GAMEPAD_BUTTON_THRESHOLD
+      || gamepadButtonValue(gamepad, GAMEPAD_BUTTON.triangle) > GAMEPAD_BUTTON_THRESHOLD;
+
+    this.handleGamepadMenuActions(stickX);
+  }
+
+  handleGamepadMenuActions(stickX) {
+    if (this.raceFinished) {
+      if (
+        this.isGamepadButtonPressed(GAMEPAD_BUTTON.cross)
+        || this.isGamepadButtonPressed(GAMEPAD_BUTTON.options)
+      ) {
+        this.restartRace();
+      }
+      return;
+    }
+
+    if (this.raceStarted || this.vehicleSelectionLocked) return;
+
+    const dpadDirection = (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadRight) ? 1 : 0)
+      + (this.gamepadInput.buttons.get(GAMEPAD_BUTTON.dpadLeft) ? -1 : 0);
+    const stickDirection = Math.abs(stickX) > 0.62 ? Math.sign(stickX) : 0;
+    const menuDirection = dpadDirection || stickDirection;
+    if (menuDirection !== 0 && menuDirection !== this.gamepadInput.menuAxis) {
+      this.moveFocusedCarChoice(menuDirection);
+    }
+    this.gamepadInput.menuAxis = menuDirection;
+
+    if (this.isGamepadButtonPressed(GAMEPAD_BUTTON.cross)) {
+      this.selectFocusedCarChoice();
+    }
+  }
+
+  getPlayerInput() {
+    const keyboardSteer = (this.keys.get('arrowleft') || this.keys.get('a') ? 1 : 0)
+      + (this.keys.get('arrowright') || this.keys.get('d') ? -1 : 0);
+    const throttleAmount = Math.max(
+      this.keys.get('arrowup') || this.keys.get('w') ? 1 : 0,
+      this.gamepadInput.throttle > GAMEPAD_TRIGGER_THRESHOLD ? this.gamepadInput.throttle : 0,
+    );
+    const brakeAmount = Math.max(
+      this.keys.get('arrowdown') || this.keys.get('s') ? 1 : 0,
+      this.gamepadInput.brake > GAMEPAD_TRIGGER_THRESHOLD ? this.gamepadInput.brake : 0,
+    );
+
+    return {
+      forward: throttleAmount > GAMEPAD_TRIGGER_THRESHOLD,
+      backward: brakeAmount > GAMEPAD_TRIGGER_THRESHOLD,
+      throttleAmount,
+      brakeAmount,
+      steer: THREE.MathUtils.clamp(keyboardSteer + this.gamepadInput.steer, -1, 1),
+      nitroHeld: Boolean(this.keys.get('space') || this.gamepadInput.nitro),
+    };
   }
 
   async selectVehicle(vehicle) {
@@ -588,6 +973,8 @@ export class RacingGame {
     this.vehicleSelectionLocked = true;
     const requestId = ++this.vehicleLoadRequest;
     this.selectedVehicle = vehicle;
+    const selectedIndex = ASSETS.models.vehicles.findIndex((candidate) => candidate.id === vehicle.id);
+    if (selectedIndex >= 0) this.gamepadInput.selectionIndex = selectedIndex;
     this.opponentVehicles = this.pickOpponentVehicles(vehicle);
     this.raceStarted = false;
     this.sfx.playOneShot('uiClick', 0.38, { force: true });
@@ -600,6 +987,7 @@ export class RacingGame {
     this.startScreen?.classList.add('start-screen--loading');
     this.carPicker?.querySelectorAll('.car-choice').forEach((button) => {
       button.disabled = true;
+      button.classList.remove('is-controller-focus');
       button.classList.toggle('is-selected', button.dataset.carId === vehicle.id);
     });
 
@@ -616,6 +1004,7 @@ export class RacingGame {
     if (requestId !== this.vehicleLoadRequest) return;
 
     this.reset();
+    this.setVehiclesVisible(true);
     this.raceStarted = true;
     this.clock.getDelta();
     this.startScreen?.classList.add('is-hidden');
@@ -638,7 +1027,7 @@ export class RacingGame {
       const key = normalizeInputKey(event);
       this.keys.set(key, true);
 
-      if (!this.raceStarted && /^[1-3]$/.test(key)) {
+      if (!this.raceStarted && /^[1-9]$/.test(key)) {
         const vehicle = ASSETS.models.vehicles[Number(key) - 1];
         if (vehicle) {
           event.preventDefault();
@@ -652,12 +1041,7 @@ export class RacingGame {
       }
       if (key === 'r' && (this.raceStarted || this.raceFinished)) {
         event.preventDefault();
-        const restartFinishedRace = this.raceFinished;
-        this.reset();
-        if (restartFinishedRace) {
-          this.raceStarted = true;
-          this.clock.getDelta();
-        }
+        this.restartRace();
       }
     };
 
@@ -665,11 +1049,25 @@ export class RacingGame {
       this.keys.set(normalizeInputKey(event), false);
     };
 
+    this.onRestartRace = () => this.restartRace();
+    this.onGamepadConnected = (event) => {
+      this.gamepadInput.index = event.gamepad.index;
+    };
+    this.onGamepadDisconnected = (event) => {
+      if (this.gamepadInput.index === event.gamepad.index) {
+        this.gamepadInput.index = null;
+        this.gamepadInput.buttons = new Map();
+        this.gamepadInput.previousButtons = new Map();
+      }
+    };
     this.onResize = () => this.resize();
     this.audioToggles?.forEach((audioToggle) => audioToggle.addEventListener('click', this.onAudioToggle));
     this.carPicker?.addEventListener('click', this.onVehiclePick);
+    this.restartButton?.addEventListener('click', this.onRestartRace);
     window.addEventListener('keydown', this.onKeyDown, { passive: false });
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('gamepadconnected', this.onGamepadConnected);
+    window.addEventListener('gamepaddisconnected', this.onGamepadDisconnected);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -703,6 +1101,7 @@ export class RacingGame {
       unwrappedProgress: startProgress,
       lapMark: startProgress,
       surface: 'road',
+      slipstream: 0,
     };
     this.opponents = OPPONENT_STARTS.map((start, index) => ({
       ...start,
@@ -752,11 +1151,14 @@ export class RacingGame {
   }
 
   updatePlayer(delta) {
-    const forward = this.keys.get('arrowup') || this.keys.get('w');
-    const backward = this.keys.get('arrowdown') || this.keys.get('s');
-    const left = this.keys.get('arrowleft') || this.keys.get('a');
-    const right = this.keys.get('arrowright') || this.keys.get('d');
-    const nitroHeld = this.keys.get('space');
+    const {
+      forward,
+      backward,
+      throttleAmount,
+      brakeAmount,
+      steer,
+      nitroHeld,
+    } = this.getPlayerInput();
     const surfaceInfo = this.track.getSurfaceInfo(this.player.x, this.player.z);
     const roadSurfaceLimit = TRACK.roadWidth / 2 + TRACK.shoulderWidth;
     const desertDepth = Math.max(0, surfaceInfo.distance - roadSurfaceLimit);
@@ -772,7 +1174,6 @@ export class RacingGame {
     const headingCos = Math.cos(this.player.heading);
     const rightX = headingCos;
     const rightZ = -headingSin;
-    const steer = (left ? 1 : 0) + (right ? -1 : 0);
     const forwardSpeed = this.player.vx * headingSin + this.player.vz * headingCos;
     const lateralSpeed = this.player.vx * rightX + this.player.vz * rightZ;
     const braking = backward && forwardSpeed > 1.2;
@@ -784,10 +1185,10 @@ export class RacingGame {
     const reverseAccel = onRoad ? 15 : 8;
     let driveAccel = 0;
 
-    if (forward) driveAccel += throttleAccel;
+    if (forward) driveAccel += throttleAccel * throttleAmount;
     if (nitroActive) driveAccel += nitroAccel;
-    if (braking) driveAccel -= brakeAccel;
-    if (reversing) driveAccel -= reverseAccel;
+    if (braking) driveAccel -= brakeAccel * brakeAmount;
+    if (reversing) driveAccel -= reverseAccel * brakeAmount;
 
     if (nitroActive && !this.player.nitroActive) {
       this.sfx.playOneShot('accelRev', 0.46, { playbackRate: 1.18 });
@@ -803,7 +1204,25 @@ export class RacingGame {
     this.player.vx += headingSin * driveAccel * delta;
     this.player.vz += headingCos * driveAccel * delta;
 
-    const currentForwardSpeed = this.player.vx * headingSin + this.player.vz * headingCos;
+    let currentForwardSpeed = this.player.vx * headingSin + this.player.vz * headingCos;
+    const slipstreamStrength = this.getSlipstreamStrength({
+      progress: surfaceInfo.progress,
+      headingSin,
+      headingCos,
+      rightX,
+      rightZ,
+      forwardSpeed: currentForwardSpeed,
+      onRoad: onRoad && !braking && !reversing,
+    });
+    this.player.slipstream = slipstreamStrength;
+
+    if (slipstreamStrength > 0 && (forward || nitroActive)) {
+      const slipstreamAccel = SLIPSTREAM_ACCEL * slipstreamStrength * delta;
+      this.player.vx += headingSin * slipstreamAccel;
+      this.player.vz += headingCos * slipstreamAccel;
+      currentForwardSpeed = this.player.vx * headingSin + this.player.vz * headingCos;
+    }
+
     const naturalDecel = Math.max(0, this.player.previousForwardSpeed - currentForwardSpeed) / Math.max(delta, 0.001);
     const brakingLoad = braking ? 1 : 0;
     const suddenDecelLoad = THREE.MathUtils.clamp((naturalDecel - 9) / 28, 0, 1);
@@ -827,13 +1246,15 @@ export class RacingGame {
       ? THREE.MathUtils.lerp(driveableGrip, DRIFT_GRIP, this.player.rearSlip)
       : THREE.MathUtils.lerp(DESERT_EDGE_GRIP, DESERT_DEEP_GRIP, desertDepthFactor);
     const dampedLateralSpeed = lateralSpeed * Math.exp(-grip * delta);
-    const forwardDrag = onRoad ? 0.38 : THREE.MathUtils.lerp(DESERT_EDGE_DRAG, DESERT_DEEP_DRAG, desertDepthFactor);
+    const baseForwardDrag = onRoad ? 0.38 : THREE.MathUtils.lerp(DESERT_EDGE_DRAG, DESERT_DEEP_DRAG, desertDepthFactor);
+    const forwardDrag = baseForwardDrag * (1 - SLIPSTREAM_DRAG_REDUCTION * slipstreamStrength);
     const dampedForwardSpeed = currentForwardSpeed * Math.exp(-forwardDrag * delta);
     const nitroSpeedBoost = nitroActive
       ? THREE.MathUtils.lerp(NITRO_MAX_SPEED_BOOST, NITRO_MAX_SPEED_BOOST * 0.42, desertDepthFactor)
       : 0;
-    const maxForward = (onRoad ? 42 : THREE.MathUtils.lerp(DESERT_EDGE_MAX_SPEED, DESERT_DEEP_MAX_SPEED, desertDepthFactor))
-      + nitroSpeedBoost;
+    const maxForward = (onRoad ? PLAYER_ROAD_MAX_SPEED : THREE.MathUtils.lerp(DESERT_EDGE_MAX_SPEED, DESERT_DEEP_MAX_SPEED, desertDepthFactor))
+      + nitroSpeedBoost
+      + SLIPSTREAM_MAX_SPEED_BOOST * slipstreamStrength;
     const maxReverse = onRoad ? -13 : -7;
     const clampedForwardSpeed = THREE.MathUtils.clamp(dampedForwardSpeed, maxReverse, maxForward);
 
@@ -887,6 +1308,54 @@ export class RacingGame {
       driveAccel,
       desertDepthFactor,
     });
+  }
+
+  getSlipstreamStrength({
+    progress,
+    headingSin,
+    headingCos,
+    rightX,
+    rightZ,
+    forwardSpeed,
+    onRoad,
+  }) {
+    if (!onRoad || forwardSpeed < SLIPSTREAM_MIN_SPEED || !this.opponents?.length) return 0;
+
+    const turnSeverity = Math.max(
+      this.estimateTrackTurn(progress, 0.012),
+      this.estimateTrackTurn(progress + 0.018, 0.012),
+    );
+    const turnFactor = 1 - smoothStep(SLIPSTREAM_TURN_FADE_START, SLIPSTREAM_TURN_FADE_END, turnSeverity);
+    if (turnFactor <= 0) return 0;
+
+    let strongestDraft = 0;
+    for (const opponent of this.opponents) {
+      if (opponent.recoveryTime > 0) continue;
+
+      const toOpponentX = opponent.x - this.player.x;
+      const toOpponentZ = opponent.z - this.player.z;
+      const forwardDistance = toOpponentX * headingSin + toOpponentZ * headingCos;
+      if (forwardDistance < SLIPSTREAM_MIN_DISTANCE || forwardDistance > SLIPSTREAM_MAX_DISTANCE) continue;
+
+      const lateralDistance = Math.abs(toOpponentX * rightX + toOpponentZ * rightZ);
+      if (lateralDistance > SLIPSTREAM_MAX_LATERAL_DISTANCE) continue;
+
+      const opponentHeading = this.opponentRoots?.[opponent.index]?.rotation.y ?? this.getTrackPose(opponent.progress).heading;
+      const alignment = headingSin * Math.sin(opponentHeading) + headingCos * Math.cos(opponentHeading);
+      if (alignment < SLIPSTREAM_MIN_ALIGNMENT) continue;
+
+      const distanceFactor = smoothStep(SLIPSTREAM_MIN_DISTANCE, SLIPSTREAM_MIN_DISTANCE + 7, forwardDistance)
+        * (1 - smoothStep(SLIPSTREAM_MAX_DISTANCE - 10, SLIPSTREAM_MAX_DISTANCE, forwardDistance));
+      const lateralFactor = 1 - smoothStep(0, SLIPSTREAM_MAX_LATERAL_DISTANCE, lateralDistance);
+      const alignmentFactor = smoothStep(SLIPSTREAM_MIN_ALIGNMENT, 0.96, alignment);
+      const speedFactor = smoothStep(SLIPSTREAM_MIN_SPEED, PLAYER_ROAD_MAX_SPEED * 0.72, forwardSpeed);
+      strongestDraft = Math.max(
+        strongestDraft,
+        distanceFactor * lateralFactor * alignmentFactor * speedFactor * turnFactor,
+      );
+    }
+
+    return THREE.MathUtils.clamp(strongestDraft, 0, 1);
   }
 
   updateDrivingAudio({ forward, nitroActive, onRoad, lateralSpeed, forwardSpeed, speed, driveAccel, desertDepthFactor }) {
@@ -1058,6 +1527,11 @@ export class RacingGame {
       direction: TUMBLEWEED_WIND.clone(),
       rollAxis: new THREE.Vector3(TUMBLEWEED_WIND.z, 0, -TUMBLEWEED_WIND.x).normalize(),
       wobble: Math.random() * Math.PI * 2,
+      bounceHeight: THREE.MathUtils.lerp(TUMBLEWEED_MIN_BOUNCE_HEIGHT, TUMBLEWEED_MAX_BOUNCE_HEIGHT, Math.random()),
+      bounceRate: THREE.MathUtils.lerp(TUMBLEWEED_MIN_BOUNCE_RATE, TUMBLEWEED_MAX_BOUNCE_RATE, Math.random()),
+      sideAxis: crossWind.normalize(),
+      skitterStrength: 0.35 + Math.random() * 0.5,
+      previousSkitterOffset: 0,
     });
   }
 
@@ -1075,14 +1549,22 @@ export class RacingGame {
       tumbleweed.age += delta;
       tumbleweed.root.position.x += tumbleweed.direction.x * tumbleweed.speed * delta;
       tumbleweed.root.position.z += tumbleweed.direction.z * tumbleweed.speed * delta;
+      const bounceWave = Math.abs(Math.sin(tumbleweed.age * tumbleweed.bounceRate + tumbleweed.wobble));
+      const bounceLift = Math.pow(bounceWave, 1.7);
+      const skitterOffset = Math.sin(tumbleweed.age * tumbleweed.bounceRate * 0.48 + tumbleweed.wobble)
+        * tumbleweed.skitterStrength;
+      const skitterDelta = skitterOffset - tumbleweed.previousSkitterOffset;
+      tumbleweed.root.position.x += tumbleweed.sideAxis.x * skitterDelta;
+      tumbleweed.root.position.z += tumbleweed.sideAxis.z * skitterDelta;
+      tumbleweed.previousSkitterOffset = skitterOffset;
       tumbleweed.root.position.y = TRACK.roadY
         + tumbleweed.radius
-        + Math.abs(Math.sin(tumbleweed.age * 6.5 + tumbleweed.wobble)) * 0.16;
+        + bounceLift * tumbleweed.bounceHeight;
       tumbleweed.root.rotateOnWorldAxis(
         tumbleweed.rollAxis,
-        (tumbleweed.speed / Math.max(0.1, tumbleweed.radius)) * delta,
+        (tumbleweed.speed / Math.max(0.1, tumbleweed.radius)) * delta * (1 + bounceLift * 0.18),
       );
-      tumbleweed.root.rotateOnWorldAxis(tumbleweed.direction, delta * 0.85);
+      tumbleweed.root.rotateOnWorldAxis(tumbleweed.direction, delta * (0.55 + bounceLift * 0.65));
 
       const distanceFromPlayer = Math.hypot(
         tumbleweed.root.position.x - this.player.x,
@@ -1536,6 +2018,7 @@ export class RacingGame {
 
   animate() {
     const delta = Math.min(this.clock.getDelta(), 0.033);
+    this.updateGamepadInput();
 
     if (this.raceStarted) {
       this.updatePlayer(delta);
@@ -1566,11 +2049,16 @@ export class RacingGame {
     window.cancelAnimationFrame(this.animationId);
     this.audioToggles?.forEach((audioToggle) => audioToggle.removeEventListener('click', this.onAudioToggle));
     this.carPicker?.removeEventListener('click', this.onVehiclePick);
+    this.restartButton?.removeEventListener('click', this.onRestartRace);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('gamepadconnected', this.onGamepadConnected);
+    window.removeEventListener('gamepaddisconnected', this.onGamepadDisconnected);
     window.removeEventListener('resize', this.onResize);
     this.clearSmoke();
     this.clearTumbleweeds();
+    this.backgroundSceneryRoot?.removeFromParent();
+    this.backgroundSceneryRoot = null;
     this.bgmAudio?.pause();
     this.bgmAudio = null;
     this.sfx.dispose();

@@ -4,8 +4,18 @@ export const ASSETS = {
       { id: 'car-1', name: 'CAR 001', path: '/assets/models/car.glb' },
       { id: 'car-2', name: 'CAR 002', path: '/assets/models/car-2.glb' },
       { id: 'car-3', name: 'CAR 003', path: '/assets/models/car-3.glb' },
+      { id: 'car-4', name: 'CAR 004', path: '/assets/models/car-4.glb' },
     ],
     tumbleweed: { id: 'tumbleweed-1', name: 'Tumbleweed', path: '/assets/models/Tumbleweed3.glb' },
+    scenery: [
+      { id: 'plants-01', name: 'Plants 01', path: '/assets/models/scenery/plants_01.glb' },
+      { id: 'plants-02', name: 'Plants 02', path: '/assets/models/scenery/plants_02.glb' },
+      { id: 'cactus-01', name: 'Cactus 01', path: '/assets/models/scenery/cactus_01.glb' },
+      { id: 'cactus-02', name: 'Cactus 02', path: '/assets/models/scenery/cactus_02.glb' },
+      { id: 'stone-01', name: 'Stone 01', path: '/assets/models/scenery/stone_01.glb' },
+      { id: 'stone-02', name: 'Stone 02', path: '/assets/models/scenery/stone_02.glb' },
+      { id: 'stone-03', name: 'Stone 03', path: '/assets/models/scenery/stone_03.glb' },
+    ],
   },
   audio: {
     bgm: [
@@ -55,12 +65,12 @@ export const TRACK = {
   shoulderWidth: 6.5,
   visualShoulderWidth: 4.4,
   roadY: 0.04,
-  worldLimitRx: 310,
-  worldLimitRz: 285,
+  worldLimitRx: 350,
+  worldLimitRz: 485,
 };
 
 export const PLAYER_START = {
-  x: -70,
+  x: -128,
   z: -132,
-  heading: 1.42,
+  heading: Math.PI,
 };

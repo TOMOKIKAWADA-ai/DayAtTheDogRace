@@ -184,35 +184,35 @@ export function createGrassFallbackTexture() {
   return makeCanvasTexture((ctx, width, height) => {
     const random = createRandom(0x64657374);
 
-    ctx.fillStyle = '#a6865c';
+    ctx.fillStyle = '#d2b982';
     ctx.fillRect(0, 0, width, height);
 
     for (let i = 0; i < 44; i += 1) {
-      const shade = 125 + Math.floor(random() * 46);
-      ctx.fillStyle = `rgba(${shade + 36}, ${shade + 13}, ${shade - 24}, ${randomBetween(random, 0.05, 0.14)})`;
+      const shade = 150 + Math.floor(random() * 42);
+      ctx.fillStyle = `rgba(${shade + 32}, ${shade + 12}, ${shade - 18}, ${randomBetween(random, 0.035, 0.1)})`;
       ctx.beginPath();
       ctx.ellipse(random() * width, random() * height, randomBetween(random, 16, 62), randomBetween(random, 10, 42), random() * Math.PI, 0, Math.PI * 2);
       ctx.fill();
     }
 
     for (let i = 0; i < 4400; i += 1) {
-      const base = 92 + Math.floor(random() * 82);
-      ctx.fillStyle = `rgba(${base + 42}, ${base + 22}, ${base - 6}, ${randomBetween(random, 0.15, 0.43)})`;
+      const base = 128 + Math.floor(random() * 66);
+      ctx.fillStyle = `rgba(${base + 36}, ${base + 18}, ${base - 4}, ${randomBetween(random, 0.1, 0.28)})`;
       ctx.fillRect(random() * width, random() * height, randomBetween(random, 0.6, 2.8), randomBetween(random, 0.6, 3.6));
     }
 
     drawPebbles(ctx, width, height, random, 160, {
       minRadius: 0.9,
       maxRadius: 4.2,
-      toneMin: 76,
-      toneMax: 142,
-      redShift: 32,
-      greenShift: 19,
-      blueShift: 0,
-      alphaMin: 0.16,
-      alphaMax: 0.42,
+      toneMin: 104,
+      toneMax: 164,
+      redShift: 24,
+      greenShift: 16,
+      blueShift: 2,
+      alphaMin: 0.1,
+      alphaMax: 0.28,
     });
-    drawDryBrush(ctx, width, height, random, 72);
+    drawDryBrush(ctx, width, height, random, 52);
   }, 18, 18, { width: 512, height: 512 });
 }
 
@@ -220,21 +220,21 @@ export function createRoadEdgeFallbackTexture() {
   return makeCanvasTexture((ctx, width, height) => {
     const random = createRandom(0x65646765);
     const image = ctx.createImageData(width, height);
-    const asphalt = [74, 70, 62];
-    const sand = [161, 126, 80];
+    const asphalt = [82, 78, 68];
+    const sand = [206, 181, 127];
 
     for (let y = 0; y < height; y += 1) {
       const yNorm = y / height;
-      const edge = 0.37
-        + Math.sin(yNorm * Math.PI * 7.5) * 0.035
-        + Math.sin(yNorm * Math.PI * 19.2) * 0.018;
-      const blendWidth = 0.34 + Math.sin(yNorm * Math.PI * 5.4) * 0.035;
+      const edge = 0.3
+        + Math.sin(yNorm * Math.PI * 7.5) * 0.026
+        + Math.sin(yNorm * Math.PI * 19.2) * 0.012;
+      const blendWidth = 0.46 + Math.sin(yNorm * Math.PI * 5.4) * 0.03;
 
       for (let x = 0; x < width; x += 1) {
         const xNorm = x / width;
         const t = smoothStep(edge, edge + blendWidth, xNorm);
-        const grit = (random() - 0.5) * 34;
-        const warmDust = smoothStep(0.18, 0.82, xNorm) * 16;
+        const grit = (random() - 0.5) * 24;
+        const warmDust = smoothStep(0.15, 0.9, xNorm) * 10;
         const color = lerpColor(asphalt, sand, t);
         const index = (y * width + x) * 4;
 
@@ -251,26 +251,26 @@ export function createRoadEdgeFallbackTexture() {
       const x = random() * width;
       const y = random() * height;
       const xNorm = x / width;
-      const base = xNorm < 0.42 ? 54 + Math.floor(random() * 52) : 92 + Math.floor(random() * 76);
-      const red = base + (xNorm < 0.42 ? 12 : 38);
-      const green = base + (xNorm < 0.42 ? 8 : 19);
-      const blue = base + (xNorm < 0.42 ? -4 : -8);
-      ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, ${randomBetween(random, 0.16, 0.44)})`;
+      const base = xNorm < 0.42 ? 66 + Math.floor(random() * 46) : 118 + Math.floor(random() * 58);
+      const red = base + (xNorm < 0.42 ? 10 : 30);
+      const green = base + (xNorm < 0.42 ? 7 : 16);
+      const blue = base + (xNorm < 0.42 ? -3 : -2);
+      ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, ${randomBetween(random, 0.1, 0.3)})`;
       ctx.fillRect(x, y, randomBetween(random, 0.7, 2.5), randomBetween(random, 0.7, 3.2));
     }
 
     drawPebbles(ctx, width, height, random, 250, {
       minRadius: 0.9,
       maxRadius: 4.6,
-      toneMin: 62,
-      toneMax: 138,
-      redShift: 24,
-      greenShift: 14,
-      blueShift: -2,
-      alphaMin: 0.18,
-      alphaMax: 0.48,
+      toneMin: 82,
+      toneMax: 152,
+      redShift: 20,
+      greenShift: 13,
+      blueShift: 0,
+      alphaMin: 0.12,
+      alphaMax: 0.34,
     });
-    drawDryBrush(ctx, width, height, random, 42, (xNorm) => xNorm > 0.48);
+    drawDryBrush(ctx, width, height, random, 28, (xNorm) => xNorm > 0.48);
   }, 1, 1, {
     width: 512,
     height: 512,
