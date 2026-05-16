@@ -101,6 +101,7 @@ export function createFallbackCar(bodyColor, accentColor) {
 
 export function prepareLoadedCar(model, targetSize = new THREE.Vector3(3.5, 2.0, 6.0)) {
   const root = model.clone(true);
+  const visual = new THREE.Group();
   enableShadows(root);
   alignLengthToForwardAxis(root);
 
@@ -108,7 +109,8 @@ export function prepareLoadedCar(model, targetSize = new THREE.Vector3(3.5, 2.0,
   const size = bounds.getSize(new THREE.Vector3());
 
   if (size.lengthSq() === 0) {
-    return root;
+    visual.add(root);
+    return visual;
   }
 
   const scale = Math.min(targetSize.x / size.x, targetSize.y / size.y, targetSize.z / size.z)
@@ -121,7 +123,8 @@ export function prepareLoadedCar(model, targetSize = new THREE.Vector3(3.5, 2.0,
   root.position.sub(center);
   root.position.y += center.y - minY - LOADED_CAR_GROUND_SINK;
 
-  return root;
+  visual.add(root);
+  return visual;
 }
 
 export function replaceVehicleVisual(vehicleRoot, currentVisual, nextVisual) {

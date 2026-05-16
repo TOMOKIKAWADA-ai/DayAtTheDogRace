@@ -9,6 +9,7 @@ import {
   loadTextureOrFallback,
 } from './assets.js';
 import { GameAudio } from './audio.js';
+import { CHARACTER_AFFECTION_MAX, RACE_CHARACTERS } from './characters.js';
 import { createTrack } from './track.js';
 import {
   VEHICLE_GRAPHIC_SCALE,
@@ -38,6 +39,53 @@ function randomBgmIndex(excludedIndex = -1) {
   return nextIndex;
 }
 
+function randomArrayItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function pickDifferentLine(lines, previousLine) {
+  if (!lines?.length) return '';
+  if (lines.length === 1) return lines[0];
+
+  let line = randomArrayItem(lines);
+  for (let i = 0; i < 4 && line === previousLine; i += 1) {
+    line = randomArrayItem(lines);
+  }
+  return line;
+}
+
+function createDefaultCharacterAffinity() {
+  return Object.fromEntries(RACE_CHARACTERS.map((character) => [character.id, 0]));
+}
+
+function normalizeCharacterAffinity(source = {}) {
+  const defaults = createDefaultCharacterAffinity();
+  RACE_CHARACTERS.forEach((character) => {
+    const value = Number(source[character.id]);
+    defaults[character.id] = Number.isFinite(value)
+      ? THREE.MathUtils.clamp(Math.floor(value), 0, CHARACTER_AFFECTION_MAX)
+      : 0;
+  });
+  return defaults;
+}
+
+function ordinalPlace(place) {
+  if (!Number.isFinite(place)) return '--';
+  const mod100 = place % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${place}th`;
+
+  switch (place % 10) {
+    case 1:
+      return `${place}st`;
+    case 2:
+      return `${place}nd`;
+    case 3:
+      return `${place}rd`;
+    default:
+      return `${place}th`;
+  }
+}
+
 function normalizeInputKey(event) {
   return event.code === 'Space' ? 'space' : event.key.toLowerCase();
 }
@@ -52,6 +100,59 @@ function gamepadButtonValue(gamepad, index) {
   const button = gamepad?.buttons?.[index];
   if (typeof button === 'number') return button;
   return button?.value ?? (button?.pressed ? 1 : 0);
+}
+
+const MENU_CONTROL_ROWS = [
+  { action: '車を選ぶ', keys: ['Click', '1-4', 'D-Pad / LS'] },
+  { action: '決定', keys: ['Click', '1-4', 'Cross'] },
+];
+const KEYBOARD_CONTROL_ROWS = [
+  { action: 'アクセル', keys: ['W', '↑'] },
+  { action: 'ブレーキ / バック', keys: ['S', '↓'] },
+  { action: 'ステアリング', keys: ['A / D', '← / →'] },
+  { action: 'ニトロ', keys: ['Space'] },
+  { action: '一時停止', keys: ['P', 'Esc'] },
+  { action: 'リスタート', keys: ['R'] },
+];
+const GAMEPAD_CONTROL_ROWS = [
+  { action: 'ステアリング', keys: ['LS', 'D-Pad'] },
+  { action: 'アクセル', keys: ['R2', 'Cross'] },
+  { action: 'ブレーキ / バック', keys: ['L2', 'Circle', 'Square'] },
+  { action: 'ニトロ', keys: ['R1', 'Triangle'] },
+  { action: '一時停止', keys: ['OPTIONS'] },
+];
+
+function createKeyCaps(keys) {
+  return keys.map((key) => `<kbd>${key}</kbd>`).join('');
+}
+
+function createControlGroup(title, rows) {
+  return `
+    <div class="control-group">
+      <span class="control-group-title">${title}</span>
+      ${rows.map((row) => `
+        <div class="control-row">
+          <span class="control-action">${row.action}</span>
+          <span class="control-keys">${createKeyCaps(row.keys)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function createControlsGuide({ includeMenu = false, modifier = '' } = {}) {
+  const groups = [
+    includeMenu ? createControlGroup('CAR SELECT', MENU_CONTROL_ROWS) : '',
+    createControlGroup('KEYBOARD', KEYBOARD_CONTROL_ROWS),
+    createControlGroup('PS5 PAD', GAMEPAD_CONTROL_ROWS),
+  ].filter(Boolean).join('');
+
+  return `
+    <div class="controls-guide ${modifier}" aria-label="操作方法">
+      <div class="controls-guide-title">操作方法</div>
+      <div class="controls-grid">${groups}</div>
+    </div>
+  `;
 }
 
 const GAMEPAD_BUTTON = {
@@ -79,8 +180,12 @@ const DESERT_DEEP_DRAG = 2.35;
 const DESERT_EDGE_MAX_SPEED = 16;
 const DESERT_DEEP_MAX_SPEED = 10;
 const DESERT_DEPTH_FOR_FULL_SLOWDOWN = 18;
-const OPPONENT_MAX_SPEED = 0.064;
-const OPPONENT_MIN_CORNER_SPEED = 0.019;
+const ROAD_THROTTLE_DRAG = 0.38;
+const ROAD_COAST_DRAG = 0.24;
+const PLAYER_FRONT_AXLE_OFFSET = 1.8 * VEHICLE_GRAPHIC_SCALE;
+const PLAYER_FRONT_AXLE_PIVOT_STRENGTH = 0.82;
+const OPPONENT_MAX_SPEED = 0.046;
+const OPPONENT_MIN_CORNER_SPEED = 0.016;
 const OPPONENT_COUNT = 3;
 const OPPONENT_OUTSIDE_LINE_OFFSET = TRACK.roadWidth * 0.2;
 const OPPONENT_INSIDE_LINE_OFFSET = TRACK.roadWidth * 0.18;
@@ -93,12 +198,18 @@ const MAX_SMOKE_PARTICLES = 54;
 const OPPONENT_RECOVERY_PULL = 3.25;
 const OPPONENT_KNOCKBACK_DAMPING = 1.9;
 const OPPONENT_RECOVERY_TIME = 2.9;
+const OPPONENT_RECOVERY_SNAP_DISTANCE = 0.18;
+const OPPONENT_RECOVERY_SNAP_SPEED = 0.55;
 const OPPONENT_HIT_COOLDOWN = 0.24;
 const ROAD_SURFACE_RELEASE_MARGIN = 0.6;
 const THROTTLE_UNDERSTEER_STRENGTH = 0.72;
 const DECEL_TURN_IN_STRENGTH = 0.72;
 const LIFT_OFF_LOAD_FACTOR = 0.58;
-const RACE_LAPS = 4;
+const VEHICLE_BRAKE_PITCH = 0.14;
+const VEHICLE_ACCEL_PITCH = 0.006;
+const VEHICLE_STEER_ROLL = 0.02;
+const VEHICLE_STEER_ROLL_START = 0.78;
+const RACE_LAPS = 3;
 const PLAYER_ROAD_MAX_SPEED = 54;
 const NITRO_ACCEL = 48;
 const NITRO_DRAIN_RATE = 0.14;
@@ -115,9 +226,18 @@ const SLIPSTREAM_MAX_SPEED_BOOST = 7;
 const SLIPSTREAM_ACCEL = 9.5;
 const COUNTDOWN_SECONDS = 3;
 const COUNTDOWN_GO_DISPLAY_SECONDS = 0.72;
+const CHARACTER_AFFECTION_STORAGE_KEY = 'eagle-rock-character-affection-v1';
+const CHARACTER_DIALOGUE_DURATION = 3.25;
+const CHARACTER_DIALOGUE_DEFAULT_COOLDOWN = 3.4;
+const CHARACTER_CORNER_COOLDOWN = 8.5;
+const CHARACTER_OVERTAKE_COOLDOWN = 2.6;
+const CHARACTER_DANGER_COOLDOWN = 8.0;
+const CHARACTER_BOOST_COOLDOWN = 5.4;
+const CHARACTER_STUCK_OFFROAD_SECONDS = 2.6;
+const CHARACTER_OPPONENT_INDEX = 0;
 const START_GRID_LANE_OFFSET = 4.7;
 const START_GRID_PROGRESS_SPACING = 0.018;
-const PLAYER_GRID_PROGRESS = 0;
+const PLAYER_GRID_PROGRESS = -START_GRID_PROGRESS_SPACING * OPPONENT_COUNT;
 const PLAYER_GRID_LINE_OFFSET = START_GRID_LANE_OFFSET;
 const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
@@ -126,6 +246,11 @@ const ENGINE_BASE_VOLUME = 0.1;
 const TUMBLEWEED_MAX_COUNT = 6;
 const TUMBLEWEED_VISUAL_SIZE = 3.8;
 const TUMBLEWEED_WIND = new THREE.Vector3(-0.62, 0, 0.78).normalize();
+const SAND_WIND = new THREE.Vector3(-0.66, 0, 0.75).normalize();
+const MAX_SAND_WISPS = 52;
+const SAND_WISP_SPAWN_RATE = 7.5;
+const SAND_WISP_SPAWN_RADIUS = 118;
+const SAND_WISP_DESPAWN_DISTANCE = 168;
 const TUMBLEWEED_SPAWN_DISTANCE = 92;
 const TUMBLEWEED_DESPAWN_DISTANCE = 175;
 const TUMBLEWEED_MIN_SPEED = 18;
@@ -142,9 +267,9 @@ const OPPONENT_FALLBACK_COLORS = [
 ];
 const OPPONENT_NAMES = ['HAWK', 'B. CARVER', 'DUSTY'];
 const OPPONENT_STARTS = [
-  { progress: 0, speed: 0.044, lineBias: -START_GRID_LANE_OFFSET },
-  { progress: -START_GRID_PROGRESS_SPACING, speed: 0.042, lineBias: START_GRID_LANE_OFFSET },
-  { progress: -START_GRID_PROGRESS_SPACING * 2, speed: 0.041, lineBias: -START_GRID_LANE_OFFSET },
+  { progress: 0, speed: 0.035, lineBias: -START_GRID_LANE_OFFSET },
+  { progress: -START_GRID_PROGRESS_SPACING, speed: 0.033, lineBias: START_GRID_LANE_OFFSET },
+  { progress: -START_GRID_PROGRESS_SPACING * 2, speed: 0.032, lineBias: -START_GRID_LANE_OFFSET },
 ];
 const COURSE_SCENERY_COUNT = 84;
 const COURSE_SCENERY_MODELS = [
@@ -230,6 +355,50 @@ function createSmokeTexture() {
 
   context.fillStyle = gradient;
   context.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createSandWispTexture() {
+  const width = 256;
+  const height = 72;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext('2d');
+  const bodyGradient = context.createLinearGradient(0, 0, width, 0);
+  bodyGradient.addColorStop(0, 'rgba(255, 226, 168, 0)');
+  bodyGradient.addColorStop(0.2, 'rgba(255, 226, 168, 0.22)');
+  bodyGradient.addColorStop(0.58, 'rgba(238, 188, 108, 0.34)');
+  bodyGradient.addColorStop(1, 'rgba(238, 188, 108, 0)');
+
+  context.fillStyle = bodyGradient;
+  context.beginPath();
+  context.ellipse(width / 2, height / 2, width * 0.48, height * 0.28, -0.08, 0, Math.PI * 2);
+  context.fill();
+
+  for (let i = 0; i < 18; i += 1) {
+    const y = height * (0.28 + Math.random() * 0.44);
+    const x = width * Math.random() * 0.2;
+    const length = width * (0.3 + Math.random() * 0.48);
+    const opacity = 0.05 + Math.random() * 0.08;
+    context.strokeStyle = `rgba(255, 240, 190, ${opacity})`;
+    context.lineWidth = 1 + Math.random() * 2.2;
+    context.beginPath();
+    context.moveTo(x, y);
+    context.bezierCurveTo(
+      x + length * 0.32,
+      y - 7 + Math.random() * 14,
+      x + length * 0.7,
+      y - 10 + Math.random() * 20,
+      x + length,
+      y + (Math.random() - 0.5) * 12,
+    );
+    context.stroke();
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -351,6 +520,8 @@ export class RacingGame {
     this.assetMessages = [];
     this.smokeParticles = [];
     this.smokeEmitAccumulator = 0;
+    this.sandWisps = [];
+    this.sandWispEmitAccumulator = 0;
     this.tumbleweeds = [];
     this.tumbleweedPrototype = null;
     this.backgroundSceneryRoot = null;
@@ -358,9 +529,25 @@ export class RacingGame {
     this.raceStarted = false;
     this.raceFinished = false;
     this.vehicleLoadRequest = 0;
-    this.vehicleSelectionLocked = false;
+    this.vehicleSelectionLocked = true;
     this.selectedVehicle = ASSETS.models.vehicles[0];
     this.opponentVehicles = this.pickOpponentVehicles(this.selectedVehicle);
+    this.characterAffinity = this.loadCharacterAffinity();
+    this.activeCharacter = null;
+    this.lastRaceResult = null;
+    this.characterDialogue = {
+      visibleUntil: 0,
+      lastEventAt: new Map(),
+      lastLineByEvent: new Map(),
+      lastPlayerAhead: null,
+      cornerPrimed: false,
+      nitroWasActive: false,
+      offroadDangerTime: 0,
+      offroadStuckTime: 0,
+      lastLimitedDialogueLap: -1,
+      finishLine: '',
+      finishExpression: 'neutral',
+    };
     this.bgmAudio = null;
     this.bgmEnabled = false;
     this.bgmIndex = randomBgmIndex();
@@ -378,6 +565,16 @@ export class RacingGame {
       nitro: false,
       menuAxis: 0,
       selectionIndex: 0,
+    };
+    this.touchInput = {
+      activeControls: new Map(),
+      stickPointerId: null,
+      stickValue: 0,
+      stickOffset: 0,
+      steer: 0,
+      throttle: false,
+      brake: false,
+      nitro: false,
     };
     this.countdown = {
       active: false,
@@ -430,14 +627,189 @@ export class RacingGame {
       this.loadBackgroundScenery(),
     ]);
     this.reset();
+    this.vehicleSelectionLocked = false;
+    this.startScreen?.classList.remove('start-screen--loading');
+    this.setCarChoicesDisabled(false);
+    this.focusCarChoice(this.gamepadInput.selectionIndex);
     this.resize();
     this.animate();
+  }
+
+  loadCharacterAffinity() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return createDefaultCharacterAffinity();
+    }
+
+    try {
+      const stored = window.localStorage.getItem(CHARACTER_AFFECTION_STORAGE_KEY);
+      return normalizeCharacterAffinity(stored ? JSON.parse(stored) : {});
+    } catch {
+      return createDefaultCharacterAffinity();
+    }
+  }
+
+  saveCharacterAffinity() {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    try {
+      window.localStorage.setItem(
+        CHARACTER_AFFECTION_STORAGE_KEY,
+        JSON.stringify(normalizeCharacterAffinity(this.characterAffinity)),
+      );
+    } catch {
+      // Non-critical: private browsing or storage limits should not block play.
+    }
+  }
+
+  resetCharacterDialogueState() {
+    this.characterDialogue.visibleUntil = 0;
+    this.characterDialogue.lastEventAt = new Map();
+    this.characterDialogue.lastLineByEvent = new Map();
+    this.characterDialogue.lastPlayerAhead = null;
+    this.characterDialogue.cornerPrimed = false;
+    this.characterDialogue.nitroWasActive = false;
+    this.characterDialogue.offroadDangerTime = 0;
+    this.characterDialogue.offroadStuckTime = 0;
+    this.characterDialogue.lastLimitedDialogueLap = -1;
+    this.characterDialogue.finishLine = '';
+    this.characterDialogue.finishExpression = 'neutral';
+  }
+
+  getActiveCharacterAffinity() {
+    if (!this.activeCharacter) return 0;
+    return THREE.MathUtils.clamp(
+      this.characterAffinity[this.activeCharacter.id] ?? 0,
+      0,
+      CHARACTER_AFFECTION_MAX,
+    );
+  }
+
+  addActiveCharacterAffinity() {
+    if (!this.activeCharacter) return;
+
+    const current = this.getActiveCharacterAffinity();
+    this.characterAffinity[this.activeCharacter.id] = Math.min(
+      CHARACTER_AFFECTION_MAX,
+      current + 1,
+    );
+    this.saveCharacterAffinity();
+  }
+
+  getCharacterPortrait(expression = 'neutral') {
+    if (!this.activeCharacter) return '';
+    return this.activeCharacter.portraits[expression] ?? this.activeCharacter.portraits.neutral;
+  }
+
+  getCharacterDialogueLines(eventKey, options = {}) {
+    if (!this.activeCharacter) return [];
+    if (eventKey === 'defeat') {
+      const stage = THREE.MathUtils.clamp(
+        options.affinityStage ?? this.getActiveCharacterAffinity(),
+        0,
+        CHARACTER_AFFECTION_MAX,
+      );
+      return this.activeCharacter.defeatByAffinity[stage] ?? [];
+    }
+    return this.activeCharacter.dialogue[eventKey] ?? [];
+  }
+
+  pickCharacterLine(eventKey, options = {}) {
+    const lines = this.getCharacterDialogueLines(eventKey, options);
+    const previousLine = this.characterDialogue.lastLineByEvent.get(eventKey);
+    const line = pickDifferentLine(lines, previousLine);
+    if (line) this.characterDialogue.lastLineByEvent.set(eventKey, line);
+    return line;
+  }
+
+  updateCharacterPanel(expression = 'neutral') {
+    if (!this.characterComms?.root || !this.activeCharacter) return;
+
+    const affinity = this.getActiveCharacterAffinity();
+    const portrait = this.getCharacterPortrait(expression);
+    this.characterComms.name.textContent = this.activeCharacter.name;
+    this.characterComms.affinity.textContent = `BOND ${affinity}/${CHARACTER_AFFECTION_MAX}`;
+    this.characterComms.portrait.src = portrait;
+    this.characterComms.portrait.alt = this.activeCharacter.name;
+  }
+
+  hideCharacterDialogue() {
+    this.characterComms?.root?.classList.add('is-hidden');
+    this.characterDialogue.visibleUntil = 0;
+  }
+
+  showCharacterDialogue(eventKey, options = {}) {
+    if (!this.activeCharacter || !this.characterComms?.root) return false;
+
+    const now = performance.now();
+    const cooldown = options.cooldown ?? CHARACTER_DIALOGUE_DEFAULT_COOLDOWN;
+    const lastAt = this.characterDialogue.lastEventAt.get(eventKey) ?? -Infinity;
+    if (!options.force && now - lastAt < cooldown * 1000) return false;
+
+    const line = this.pickCharacterLine(eventKey, options);
+    if (!line) return false;
+
+    const expression = options.expression
+      ?? this.activeCharacter.expressions[eventKey]
+      ?? 'neutral';
+    this.updateCharacterPanel(expression);
+    this.characterComms.line.textContent = line;
+    this.characterComms.root.classList.remove('is-hidden');
+    this.characterDialogue.visibleUntil = now + (options.duration ?? CHARACTER_DIALOGUE_DURATION) * 1000;
+    this.characterDialogue.lastEventAt.set(eventKey, now);
+    return true;
+  }
+
+  showLimitedRaceDialogue(eventKey, options = {}) {
+    if (!this.player) return false;
+
+    const lapKey = this.player.laps;
+    if (this.characterDialogue.lastLimitedDialogueLap === lapKey) return false;
+
+    const shown = this.showCharacterDialogue(eventKey, options);
+    if (shown) {
+      this.characterDialogue.lastLimitedDialogueLap = lapKey;
+    }
+    return shown;
+  }
+
+  updateCharacterDialogueVisibility(now = performance.now()) {
+    if (!this.characterComms?.root || this.characterComms.root.classList.contains('is-hidden')) return;
+    if (this.characterDialogue.visibleUntil > 0 && now >= this.characterDialogue.visibleUntil) {
+      this.hideCharacterDialogue();
+    }
+  }
+
+  getActiveCharacterOpponent() {
+    if (!this.activeCharacter) return null;
+    return this.opponents?.find((opponent) => opponent.characterId === this.activeCharacter.id) ?? null;
+  }
+
+  isActiveCharacterOpponent(opponent) {
+    return Boolean(this.activeCharacter && opponent?.characterId === this.activeCharacter.id);
+  }
+
+  prepareRaceCharacter() {
+    this.activeCharacter = randomArrayItem(RACE_CHARACTERS);
+    this.resetCharacterDialogueState();
+
+    const characterOpponent = this.opponents?.[CHARACTER_OPPONENT_INDEX];
+    if (characterOpponent) {
+      characterOpponent.name = this.activeCharacter.shortName;
+      characterOpponent.characterId = this.activeCharacter.id;
+    }
+
+    this.updatePositionBoard();
+    this.updateCharacterPanel(this.activeCharacter.expressions.preRace);
+    this.showCharacterDialogue('preRace', {
+      force: true,
+      duration: 2.8,
+    });
   }
 
   createLayout() {
     const vehicleButtons = ASSETS.models.vehicles
       .map((vehicle, index) => `
-        <button class="car-choice" type="button" data-car-id="${vehicle.id}">
+        <button class="car-choice" type="button" data-car-id="${vehicle.id}" disabled>
           <span class="car-choice-number">${index + 1}</span>
           ${vehicle.sideImage ? `<span class="car-choice-visual"><img src="${vehicle.sideImage}" alt="" draggable="false" /></span>` : ''}
           <span class="car-choice-name">${vehicle.name}</span>
@@ -449,13 +821,15 @@ export class RacingGame {
               <path d="M 0 -5 L 4.5 6 L 0 3 L -4.5 6 Z"></path>
             </g>
     `).join('');
+    const startControls = createControlsGuide({ includeMenu: true, modifier: 'controls-guide--start' });
+    const pauseControls = createControlsGuide({ modifier: 'controls-guide--pause' });
 
     this.root.innerHTML = `
       <main class="game-shell">
         <div class="viewport" data-viewport></div>
         <section class="route-title" aria-label="route">
-          <h1>EAGLE ROCK</h1>
-          <p>HIGHWAY</p>
+          <h1>DAY OF THE DOG</h1>
+          <p>RACE</p>
         </section>
         <section class="stage-board" aria-label="stage status">
           <div class="stage-box stage-times">
@@ -495,11 +869,51 @@ ${opponentMarkers}
             <span class="audio-icon" aria-hidden="true"></span>
           </button>
         </section>
+        <section class="character-comms is-hidden" data-character-comms aria-live="polite">
+          <div class="character-portrait"><img data-character-portrait alt="" draggable="false" /></div>
+          <div class="character-copy">
+            <div class="character-meta">
+              <span data-character-name>Rival</span>
+              <span data-character-affinity>BOND 0/${CHARACTER_AFFECTION_MAX}</span>
+            </div>
+            <p class="character-line" data-character-line></p>
+          </div>
+        </section>
         <button class="pause-toggle" type="button" data-pause-toggle aria-label="Pause game">
-          <span class="pause-icon" aria-hidden="true"></span>
-        </button>
+            <span class="pause-icon" aria-hidden="true"></span>
+          </button>
+        <section class="mobile-race-hud" aria-label="mobile race status">
+          <div class="mobile-stat mobile-stat--speed">
+            <span>SPD</span>
+            <strong data-speed>0</strong>
+          </div>
+          <div class="mobile-stat">
+            <span>LAP</span>
+            <strong data-lap>0/${RACE_LAPS}</strong>
+          </div>
+          <div class="mobile-stat">
+            <span>POS</span>
+            <strong data-mobile-position>--/--</strong>
+          </div>
+          <div class="mobile-stat">
+            <span>BEST</span>
+            <strong data-best>--</strong>
+          </div>
+          <div class="mobile-meter mobile-meter--speed">
+            <span>SPEED</span>
+            <b><i data-speed-meter></i></b>
+          </div>
+          <div class="mobile-meter mobile-meter--nitro">
+            <span>NITRO</span>
+            <b><i data-nitro></i></b>
+          </div>
+          <div class="mobile-current">
+            <span>CURRENT</span>
+            <strong data-current>0.00s</strong>
+          </div>
+        </section>
         <section class="hud" aria-label="race status">
-          <h1 class="hud-title">Topdown Racing Mock</h1>
+          <h1 class="hud-title">DAY OF THE DOG RACE</h1>
           <div class="hud-grid">
             <div class="metric"><span class="metric-label">Speed</span><span class="metric-value" data-speed>0</span></div>
             <div class="metric"><span class="metric-label">Lap</span><span class="metric-value" data-lap>0/${RACE_LAPS}</span></div>
@@ -510,56 +924,76 @@ ${opponentMarkers}
             <span class="audio-icon" aria-hidden="true"></span>
           </button>
         </section>
-        <aside class="help help-garbled" aria-hidden="true">
-          <strong>操作</strong><br />
-          W/S または ↑/↓: 前進・後退<br />
-          A/D または ←/→: ステアリング<br />
-          R: リセット
-        </aside>
-        <aside class="help">
-          <strong>Controls</strong><br />
-          W/S or arrow keys: throttle / brake<br />
-          A/D or arrow keys: steer<br />
-          Space: nitro<br />
-          PS5 pad: LS steer / R2 gas / L2 brake / R1 nitro<br />
-          R: restart
-        </aside>
-        <section class="start-screen" data-start-screen aria-label="car selection">
+        <section class="touch-controls" aria-label="touch driving controls">
+          <div class="touch-stick" data-touch-stick role="group" aria-label="Steering">
+            <img class="touch-stick-base" src="/assets/ui/touch/stick-base.svg" alt="" draggable="false" />
+            <img class="touch-stick-thumb" src="/assets/ui/touch/stick.svg" alt="" draggable="false" data-touch-stick-thumb />
+          </div>
+          <div class="touch-actions">
+            <button class="touch-button touch-button--nitro" type="button" data-touch-control="nitro" aria-label="Nitro">
+              <img src="/assets/ui/touch/nitro.svg" alt="" draggable="false" />
+            </button>
+            <button class="touch-button touch-button--brake" type="button" data-touch-control="brake" aria-label="Brake or reverse">
+              <img src="/assets/ui/touch/brake.svg" alt="" draggable="false" />
+            </button>
+            <button class="touch-button touch-button--throttle" type="button" data-touch-control="throttle" aria-label="Accelerate">
+              <img src="/assets/ui/touch/gas-pedal.svg" alt="" draggable="false" />
+            </button>
+          </div>
+        </section>
+        <section class="start-screen start-screen--loading" data-start-screen aria-label="car selection">
           <div class="start-panel">
-            <p class="start-kicker">Eagle Rock Highway</p>
+            <p class="start-kicker">DAY OF THE DOG RACE</p>
             <h2 class="start-title">Choose Your Car</h2>
             <div class="car-picker" data-car-picker>${vehicleButtons}</div>
+            ${startControls}
           </div>
         </section>
         <section class="countdown-screen is-hidden" data-countdown-screen aria-label="race countdown" aria-live="polite">
           <div class="countdown-value" data-countdown-value>3</div>
         </section>
         <section class="pause-screen is-hidden" data-pause-screen aria-label="game paused" aria-live="polite">
-          <div class="pause-title">PAUSED</div>
+          <div class="pause-panel">
+            <div class="pause-title">PAUSED</div>
+            ${pauseControls}
+          </div>
         </section>
         <section class="finish-screen is-hidden" data-finish-screen aria-label="race results">
           <div class="finish-panel">
             <p class="finish-kicker">Race Complete</p>
-            <h2 class="finish-title">${RACE_LAPS} Laps Finished</h2>
+            <h2 class="finish-title" data-finish-title>${RACE_LAPS} Laps Finished</h2>
+            <div class="finish-character" data-finish-character>
+              <div class="finish-character-portrait">
+                <img data-finish-character-portrait alt="" draggable="false" />
+              </div>
+              <div class="finish-character-copy">
+                <span data-finish-character-name>Rival</span>
+                <p data-finish-character-line></p>
+              </div>
+            </div>
             <div class="finish-stats">
+              <span>Result <strong data-finish-result>--</strong></span>
               <span>Total <strong data-finish-total>--</strong></span>
               <span>Best <strong data-finish-best>--</strong></span>
               <span>Nitro <strong data-finish-nitro>--</strong></span>
             </div>
             <button class="finish-action" type="button" data-restart-race>Race Again</button>
+            <p class="finish-controls"><kbd>R</kbd><span>or</span><kbd>Cross</kbd><kbd>OPTIONS</kbd><span>でリスタート</span></p>
           </div>
         </section>
         <div class="asset-status" data-assets>loading local assets...</div>
       </main>
     `;
 
+    this.gameShell = this.root.querySelector('.game-shell');
     this.viewport = this.root.querySelector('[data-viewport]');
     this.hud = {
-      speed: this.root.querySelector('[data-speed]'),
-      lap: this.root.querySelector('[data-lap]'),
-      current: this.root.querySelector('[data-current]'),
-      best: this.root.querySelector('[data-best]'),
-      nitro: this.root.querySelector('[data-nitro]'),
+      speed: [...this.root.querySelectorAll('[data-speed]')],
+      lap: [...this.root.querySelectorAll('[data-lap]')],
+      current: [...this.root.querySelectorAll('[data-current]')],
+      best: [...this.root.querySelectorAll('[data-best]')],
+      nitro: [...this.root.querySelectorAll('[data-nitro]')],
+      speedMeters: [...this.root.querySelectorAll('[data-speed-meter]')],
       assets: this.root.querySelector('[data-assets]'),
     };
     this.courseMap = {
@@ -572,6 +1006,7 @@ ${opponentMarkers}
     };
     this.positionBoard = {
       number: this.root.querySelector('[data-position-number]'),
+      mobileNumber: this.root.querySelector('[data-mobile-position]'),
       list: this.root.querySelector('[data-position-list]'),
     };
     this.startScreen = this.root.querySelector('[data-start-screen]');
@@ -580,16 +1015,34 @@ ${opponentMarkers}
     this.pauseScreen = this.root.querySelector('[data-pause-screen]');
     this.pauseButton = this.root.querySelector('[data-pause-toggle]');
     this.finishScreen = this.root.querySelector('[data-finish-screen]');
+    this.finishTitle = this.root.querySelector('[data-finish-title]');
     this.finishStats = {
+      result: this.root.querySelector('[data-finish-result]'),
       total: this.root.querySelector('[data-finish-total]'),
       best: this.root.querySelector('[data-finish-best]'),
       nitro: this.root.querySelector('[data-finish-nitro]'),
     };
+    this.characterComms = {
+      root: this.root.querySelector('[data-character-comms]'),
+      portrait: this.root.querySelector('[data-character-portrait]'),
+      name: this.root.querySelector('[data-character-name]'),
+      affinity: this.root.querySelector('[data-character-affinity]'),
+      line: this.root.querySelector('[data-character-line]'),
+    };
+    this.finishCharacter = {
+      root: this.root.querySelector('[data-finish-character]'),
+      portrait: this.root.querySelector('[data-finish-character-portrait]'),
+      name: this.root.querySelector('[data-finish-character-name]'),
+      line: this.root.querySelector('[data-finish-character-line]'),
+    };
     this.restartButton = this.root.querySelector('[data-restart-race]');
     this.carPicker = this.root.querySelector('[data-car-picker]');
     this.carChoices = [...this.root.querySelectorAll('[data-car-id]')];
-    this.focusCarChoice(this.gamepadInput.selectionIndex);
+    this.setCarChoicesDisabled(true);
     this.audioToggles = [...this.root.querySelectorAll('[data-audio-toggle]')];
+    this.touchButtons = [...this.root.querySelectorAll('[data-touch-control]')];
+    this.touchStick = this.root.querySelector('[data-touch-stick]');
+    this.touchStickThumb = this.root.querySelector('[data-touch-stick-thumb]');
   }
 
   createRenderer() {
@@ -626,6 +1079,7 @@ ${opponentMarkers}
     this.scene.add(sun);
 
     this.smokeTexture = createSmokeTexture();
+    this.sandWispTexture = createSandWispTexture();
   }
 
   createBgmPlayer() {
@@ -722,6 +1176,26 @@ ${opponentMarkers}
     this.opponentRoots?.forEach((root) => {
       root.visible = visible;
     });
+  }
+
+  getGroundY(x, z) {
+    return this.track?.getGroundHeight(x, z) ?? 0;
+  }
+
+  getAmbientGroundY(x, z) {
+    return this.track?.getAmbientGroundHeight(x, z) ?? this.getGroundY(x, z);
+  }
+
+  getSurfaceY(x, z) {
+    return this.track?.getSurfaceHeight(x, z) ?? 0;
+  }
+
+  setCarChoicesDisabled(disabled) {
+    this.carChoices?.forEach((button) => {
+      button.disabled = disabled;
+      if (disabled) button.classList.remove('is-controller-focus');
+    });
+    this.carPicker?.classList.toggle('is-disabled', disabled);
   }
 
   focusCarChoice(index) {
@@ -827,7 +1301,7 @@ ${opponentMarkers}
       const visual = prototype.clone(true);
       visual.scale.setScalar(placement.height / prototype.userData.sourceHeight);
       const anchor = new THREE.Group();
-      anchor.position.set(placement.x, TRACK.roadY, placement.z);
+      anchor.position.set(placement.x, this.getGroundY(placement.x, placement.z), placement.z);
       anchor.rotation.set(0, placement.rotation, 0);
       anchor.add(visual);
       root.add(anchor);
@@ -887,6 +1361,7 @@ ${opponentMarkers}
     if (!this.track) {
       return {
         x: PLAYER_START.x,
+        y: this.getSurfaceY(PLAYER_START.x, PLAYER_START.z),
         z: PLAYER_START.z,
         heading: PLAYER_START.heading,
         progress: this.track?.getProgress(PLAYER_START.x, PLAYER_START.z) ?? 0,
@@ -896,9 +1371,11 @@ ${opponentMarkers}
 
     const pose = this.getTrackPose(PLAYER_GRID_PROGRESS);
     const point = pose.point.clone().addScaledVector(pose.normal, PLAYER_GRID_LINE_OFFSET);
+    point.y = this.getSurfaceY(point.x, point.z);
 
     return {
       x: point.x,
+      y: point.y,
       z: point.z,
       heading: pose.heading,
       progress: this.track.getProgress(point.x, point.z),
@@ -917,8 +1394,10 @@ ${opponentMarkers}
 
   startRaceCountdown() {
     const now = performance.now();
+    this.prepareRaceCharacter();
     this.raceStarted = false;
     this.raceFinished = false;
+    this.gameShell?.classList.add('is-race-interface-active');
     this.countdown.active = true;
     this.countdown.released = false;
     this.countdown.startedAt = now;
@@ -964,6 +1443,12 @@ ${opponentMarkers}
       this.countdown.label = label;
       this.countdownValue.textContent = label;
       this.countdownValue.classList.toggle('is-go', label === 'GO');
+      if (label === '1') {
+        this.showCharacterDialogue('ready', {
+          force: true,
+          duration: 2.2,
+        });
+      }
     }
   }
 
@@ -976,6 +1461,8 @@ ${opponentMarkers}
     this.pauseScreen?.classList.toggle('is-hidden', !active);
     this.pauseButton?.classList.toggle('is-paused', active);
     this.pauseButton?.setAttribute('aria-label', active ? 'Resume game' : 'Pause game');
+    this.gameShell?.classList.toggle('is-paused', active);
+    if (active) this.clearTouchControls();
     this.updatePauseButtonState();
   }
 
@@ -1114,16 +1601,87 @@ ${opponentMarkers}
     }
   }
 
+  isTouchControlActive(control) {
+    return (this.touchInput.activeControls.get(control)?.size ?? 0) > 0;
+  }
+
+  syncTouchInputState() {
+    const buttonSteer = (this.isTouchControlActive('steer-left') ? 1 : 0)
+      + (this.isTouchControlActive('steer-right') ? -1 : 0);
+    this.touchInput.steer = this.touchInput.stickPointerId === null
+      ? buttonSteer
+      : this.touchInput.stickValue;
+    this.touchInput.throttle = this.isTouchControlActive('throttle');
+    this.touchInput.brake = this.isTouchControlActive('brake');
+    this.touchInput.nitro = this.isTouchControlActive('nitro');
+    this.touchStickThumb?.style.setProperty('--stick-x', `${this.touchInput.stickOffset.toFixed(1)}px`);
+    this.touchButtons?.forEach((button) => {
+      button.classList.toggle('is-pressed', this.isTouchControlActive(button.dataset.touchControl));
+    });
+  }
+
+  updateTouchStick(event) {
+    if (!this.touchStick) return;
+
+    const rect = this.touchStick.getBoundingClientRect();
+    const maxOffset = Math.max(1, rect.width * 0.24);
+    const centerX = rect.left + rect.width / 2;
+    const offset = THREE.MathUtils.clamp(event.clientX - centerX, -maxOffset, maxOffset);
+    this.touchInput.stickOffset = offset;
+    this.touchInput.stickValue = -offset / maxOffset;
+    this.syncTouchInputState();
+  }
+
+  clearTouchStick() {
+    this.touchInput.stickPointerId = null;
+    this.touchInput.stickValue = 0;
+    this.touchInput.stickOffset = 0;
+    this.syncTouchInputState();
+  }
+
+  setTouchControl(control, pointerId, active) {
+    if (active) {
+      if (!this.touchInput.activeControls.has(control)) {
+        this.touchInput.activeControls.set(control, new Set());
+      }
+      this.touchInput.activeControls.get(control).add(pointerId);
+    } else {
+      this.touchInput.activeControls.get(control)?.delete(pointerId);
+      if (this.touchInput.activeControls.get(control)?.size === 0) {
+        this.touchInput.activeControls.delete(control);
+      }
+    }
+
+    this.syncTouchInputState();
+  }
+
+  clearTouchPointer(pointerId) {
+    this.touchInput.activeControls.forEach((pointers, control) => {
+      pointers.delete(pointerId);
+      if (pointers.size === 0) {
+        this.touchInput.activeControls.delete(control);
+      }
+    });
+    this.syncTouchInputState();
+  }
+
+  clearTouchControls() {
+    this.touchInput.activeControls.clear();
+    this.clearTouchStick();
+  }
+
   getPlayerInput() {
     const keyboardSteer = (this.keys.get('arrowleft') || this.keys.get('a') ? 1 : 0)
       + (this.keys.get('arrowright') || this.keys.get('d') ? -1 : 0);
     const throttleAmount = Math.max(
       this.keys.get('arrowup') || this.keys.get('w') ? 1 : 0,
       this.gamepadInput.throttle > GAMEPAD_TRIGGER_THRESHOLD ? this.gamepadInput.throttle : 0,
+      this.touchInput.throttle ? 1 : 0,
     );
     const brakeAmount = Math.max(
       this.keys.get('arrowdown') || this.keys.get('s') ? 1 : 0,
       this.gamepadInput.brake > GAMEPAD_TRIGGER_THRESHOLD ? this.gamepadInput.brake : 0,
+      this.touchInput.brake ? 1 : 0,
     );
 
     return {
@@ -1131,8 +1689,8 @@ ${opponentMarkers}
       backward: brakeAmount > GAMEPAD_TRIGGER_THRESHOLD,
       throttleAmount,
       brakeAmount,
-      steer: THREE.MathUtils.clamp(keyboardSteer + this.gamepadInput.steer, -1, 1),
-      nitroHeld: Boolean(this.keys.get('space') || this.gamepadInput.nitro),
+      steer: THREE.MathUtils.clamp(keyboardSteer + this.gamepadInput.steer + this.touchInput.steer, -1, 1),
+      nitroHeld: Boolean(this.keys.get('space') || this.gamepadInput.nitro || this.touchInput.nitro),
     };
   }
 
@@ -1154,9 +1712,8 @@ ${opponentMarkers}
     this.updateAssetStatus();
 
     this.startScreen?.classList.add('start-screen--loading');
-    this.carPicker?.querySelectorAll('.car-choice').forEach((button) => {
-      button.disabled = true;
-      button.classList.remove('is-controller-focus');
+    this.setCarChoicesDisabled(true);
+    this.carChoices?.forEach((button) => {
       button.classList.toggle('is-selected', button.dataset.carId === vehicle.id);
     });
 
@@ -1224,6 +1781,52 @@ ${opponentMarkers}
 
     this.onRestartRace = () => this.restartRace();
     this.onPauseToggle = () => this.togglePause();
+    this.onTouchControlPointerDown = (event) => {
+      const control = event.currentTarget.dataset.touchControl;
+      if (!control) return;
+
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Pointer capture is optional; the control state still updates without it.
+      }
+      this.setTouchControl(control, event.pointerId, true);
+    };
+    this.onTouchControlPointerUp = (event) => {
+      event.preventDefault();
+      try {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // The pointer may already be released by the browser.
+      }
+      this.clearTouchPointer(event.pointerId);
+    };
+    this.onTouchStickPointerDown = (event) => {
+      event.preventDefault();
+      this.touchInput.stickPointerId = event.pointerId;
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Pointer capture is optional; move events still update while over the stick.
+      }
+      this.updateTouchStick(event);
+    };
+    this.onTouchStickPointerMove = (event) => {
+      if (this.touchInput.stickPointerId !== event.pointerId) return;
+      event.preventDefault();
+      this.updateTouchStick(event);
+    };
+    this.onTouchStickPointerUp = (event) => {
+      if (this.touchInput.stickPointerId !== event.pointerId) return;
+      event.preventDefault();
+      try {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // The pointer may already be released by the browser.
+      }
+      this.clearTouchStick();
+    };
     this.onGamepadConnected = (event) => {
       this.gamepadInput.index = event.gamepad.index;
     };
@@ -1239,6 +1842,17 @@ ${opponentMarkers}
     this.carPicker?.addEventListener('click', this.onVehiclePick);
     this.restartButton?.addEventListener('click', this.onRestartRace);
     this.pauseButton?.addEventListener('click', this.onPauseToggle);
+    this.touchButtons?.forEach((button) => {
+      button.addEventListener('pointerdown', this.onTouchControlPointerDown);
+      button.addEventListener('pointerup', this.onTouchControlPointerUp);
+      button.addEventListener('pointercancel', this.onTouchControlPointerUp);
+      button.addEventListener('lostpointercapture', this.onTouchControlPointerUp);
+    });
+    this.touchStick?.addEventListener('pointerdown', this.onTouchStickPointerDown);
+    this.touchStick?.addEventListener('pointermove', this.onTouchStickPointerMove);
+    this.touchStick?.addEventListener('pointerup', this.onTouchStickPointerUp);
+    this.touchStick?.addEventListener('pointercancel', this.onTouchStickPointerUp);
+    this.touchStick?.addEventListener('lostpointercapture', this.onTouchStickPointerUp);
     window.addEventListener('keydown', this.onKeyDown, { passive: false });
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('gamepadconnected', this.onGamepadConnected);
@@ -1250,6 +1864,7 @@ ${opponentMarkers}
     const now = performance.now();
     const startPose = this.getPlayerStartPose();
     this.clearSmoke();
+    this.clearSandWisps();
     this.clearTumbleweeds();
     this.tumbleweedSpawnTimer = TUMBLEWEED_INITIAL_DELAY;
     this.countdown.active = false;
@@ -1257,7 +1872,12 @@ ${opponentMarkers}
     this.countdown.label = '';
     this.paused.active = false;
     this.paused.startedAt = 0;
+    this.clearTouchControls();
+    this.gameShell?.classList.remove('is-race-interface-active', 'is-paused');
     this.raceFinished = false;
+    this.lastRaceResult = null;
+    this.hideCharacterDialogue();
+    this.resetCharacterDialogueState();
     this.countdownScreen?.classList.add('is-hidden');
     this.pauseScreen?.classList.add('is-hidden');
     this.pauseButton?.classList.remove('is-paused');
@@ -1267,6 +1887,7 @@ ${opponentMarkers}
 
     this.player = {
       x: startPose.x,
+      y: startPose.y,
       z: startPose.z,
       heading: startPose.heading,
       vx: 0,
@@ -1293,19 +1914,22 @@ ${opponentMarkers}
       index,
       name: OPPONENT_NAMES[index] ?? `RIVAL ${index + 1}`,
       x: 0,
+      y: 0,
       z: 0,
       vx: 0,
       vz: 0,
       lineOffset: 0,
       turnSide: 1,
+      characterId: null,
       lastProgress: start.progress,
       unwrappedProgress: start.progress,
+      recovering: false,
       recoveryTime: 0,
       hitCooldown: 0,
     }));
     this.drivingAudio.throttleHeld = false;
 
-    this.playerRoot?.position.set(this.player.x, 0, this.player.z);
+    this.playerRoot?.position.set(this.player.x, this.player.y, this.player.z);
     if (this.playerRoot) {
       this.playerRoot.rotation.y = this.player.heading;
     }
@@ -1326,12 +1950,14 @@ ${opponentMarkers}
 
     const target = this.getOpponentTrackTarget(opponent, 0);
     opponent.x = target.point.x;
+    opponent.y = target.point.y;
     opponent.z = target.point.z;
     opponent.vx = 0;
     opponent.vz = 0;
+    opponent.recovering = false;
     opponent.recoveryTime = 0;
     opponent.hitCooldown = 0;
-    root.position.set(opponent.x, 0, opponent.z);
+    root.position.set(opponent.x, opponent.y, opponent.z);
     root.rotation.y = target.heading;
   }
 
@@ -1431,7 +2057,10 @@ ${opponentMarkers}
       ? THREE.MathUtils.lerp(driveableGrip, DRIFT_GRIP, this.player.rearSlip)
       : THREE.MathUtils.lerp(DESERT_EDGE_GRIP, DESERT_DEEP_GRIP, desertDepthFactor);
     const dampedLateralSpeed = lateralSpeed * Math.exp(-grip * delta);
-    const baseForwardDrag = onRoad ? 0.38 : THREE.MathUtils.lerp(DESERT_EDGE_DRAG, DESERT_DEEP_DRAG, desertDepthFactor);
+    const roadForwardDrag = (!forward && !nitroActive && !backward)
+      ? ROAD_COAST_DRAG
+      : ROAD_THROTTLE_DRAG;
+    const baseForwardDrag = onRoad ? roadForwardDrag : THREE.MathUtils.lerp(DESERT_EDGE_DRAG, DESERT_DEEP_DRAG, desertDepthFactor);
     const forwardDrag = baseForwardDrag * (1 - SLIPSTREAM_DRAG_REDUCTION * slipstreamStrength);
     const dampedForwardSpeed = currentForwardSpeed * Math.exp(-forwardDrag * delta);
     const nitroSpeedBoost = nitroActive
@@ -1457,28 +2086,55 @@ ${opponentMarkers}
       )
       : 1;
     const baseYaw = 1.9 * steerScale * loadSteerFactor * direction;
+    const oldHeading = this.player.heading;
     const driftYaw = this.player.rearSlip
-      * (braking ? 3.35 : 1.42)
-      * (1 + this.player.loadTransfer * 0.35)
+      * (braking ? 2.85 : 1.18)
+      * (1 + this.player.loadTransfer * 0.26)
       * steerScale
       * direction;
     this.player.heading += steer * (baseYaw + driftYaw) * delta;
 
     if (this.player.rearSlip > 0.08 && Math.abs(lateralSpeed) > 1.3) {
-      this.player.heading += THREE.MathUtils.clamp(lateralSpeed / 18, -1.35, 1.35) * this.player.rearSlip * delta;
+      this.player.heading += THREE.MathUtils.clamp(lateralSpeed / 22, -1.08, 1.08) * this.player.rearSlip * delta;
+    }
+
+    const headingDelta = this.player.heading - oldHeading;
+    if (Math.abs(headingDelta) > 0.0001 && Math.abs(clampedForwardSpeed) > 0.4) {
+      const oldForwardX = Math.sin(oldHeading);
+      const oldForwardZ = Math.cos(oldHeading);
+      const newForwardX = Math.sin(this.player.heading);
+      const newForwardZ = Math.cos(this.player.heading);
+      const pivotOffset = PLAYER_FRONT_AXLE_OFFSET * PLAYER_FRONT_AXLE_PIVOT_STRENGTH;
+      this.player.x += (oldForwardX - newForwardX) * pivotOffset;
+      this.player.z += (oldForwardZ - newForwardZ) * pivotOffset;
     }
 
     this.player.x += this.player.vx * delta;
     this.player.z += this.player.vz * delta;
+    this.player.y = this.getSurfaceY(this.player.x, this.player.z);
     this.player.speed = Math.hypot(this.player.vx, this.player.vz);
     this.player.previousForwardSpeed = clampedForwardSpeed;
+    this.updateCharacterDrivingDialogue(delta, {
+      onRoad,
+      nitroActive,
+      speed: this.player.speed,
+      forwardSpeed: clampedForwardSpeed,
+      lateralSpeed,
+      turnSeverity: this.estimateTrackTurn(surfaceInfo.progress),
+    });
     this.keepInsideWorld();
     const finishedRace = this.updateLapProgress();
 
-    this.playerRoot.position.set(this.player.x, 0, this.player.z);
+    this.playerRoot.position.set(this.player.x, this.player.y, this.player.z);
     this.playerRoot.rotation.y = this.player.heading + THREE.MathUtils.clamp(lateralSpeed / 22, -0.62, 0.62) * this.player.rearSlip;
-    this.playerVisual.rotation.x = -0.14 * this.player.loadTransfer;
-    this.playerVisual.rotation.z = THREE.MathUtils.clamp(lateralSpeed / 34, -0.13, 0.13) * (1 - this.player.rearSlip * 0.25);
+    const visualPitch = this.player.loadTransfer * VEHICLE_BRAKE_PITCH
+      - accelerationLoad * VEHICLE_ACCEL_PITCH;
+    const visualRollSpeedScale = smoothStep(3, 22, Math.abs(clampedForwardSpeed));
+    const steeringRollInput = Math.sign(steer)
+      * smoothStep(VEHICLE_STEER_ROLL_START, 1, Math.abs(steer));
+    const steeringRoll = -steeringRollInput * visualRollSpeedScale * VEHICLE_STEER_ROLL;
+    this.playerVisual.rotation.x = THREE.MathUtils.clamp(visualPitch, -0.05, 0.16);
+    this.playerVisual.rotation.z = THREE.MathUtils.clamp(steeringRoll, -0.035, 0.035);
     if (finishedRace) {
       return;
     }
@@ -1492,6 +2148,88 @@ ${opponentMarkers}
       speed: this.player.speed,
       driveAccel,
       desertDepthFactor,
+    });
+  }
+
+  updateCharacterDrivingDialogue(delta, {
+    onRoad,
+    nitroActive,
+    speed,
+    forwardSpeed,
+    lateralSpeed,
+    turnSeverity,
+  }) {
+    if (!this.activeCharacter) return;
+
+    if (nitroActive && !this.characterDialogue.nitroWasActive) {
+      this.showLimitedRaceDialogue('boost', {
+        cooldown: CHARACTER_BOOST_COOLDOWN,
+        duration: 2.7,
+      });
+    }
+    this.characterDialogue.nitroWasActive = nitroActive;
+
+    const cornerIsClean = onRoad
+      && turnSeverity > 0.075
+      && Math.abs(forwardSpeed) > 20
+      && Math.abs(lateralSpeed) < 6.2
+      && this.player.rearSlip < 0.52;
+    if (cornerIsClean) {
+      this.characterDialogue.cornerPrimed = true;
+    }
+    if (this.characterDialogue.cornerPrimed && turnSeverity < 0.045) {
+      this.showLimitedRaceDialogue('corner', {
+        cooldown: CHARACTER_CORNER_COOLDOWN,
+        duration: 2.9,
+      });
+      this.characterDialogue.cornerPrimed = false;
+    }
+    if (!onRoad || Math.abs(forwardSpeed) < 10) {
+      this.characterDialogue.cornerPrimed = false;
+    }
+
+    if (!onRoad) {
+      this.characterDialogue.offroadStuckTime += delta;
+      if (this.characterDialogue.offroadStuckTime > CHARACTER_STUCK_OFFROAD_SECONDS) {
+        const shown = this.showLimitedRaceDialogue('stuckOffroad', {
+          duration: 3.2,
+        });
+        if (shown) this.characterDialogue.offroadStuckTime = 0;
+      }
+    } else {
+      this.characterDialogue.offroadStuckTime = 0;
+    }
+
+    if (!onRoad && speed > 20) {
+      this.characterDialogue.offroadDangerTime += delta;
+      if (this.characterDialogue.offroadDangerTime > 1.05) {
+        const shown = this.showLimitedRaceDialogue('danger', {
+          cooldown: CHARACTER_DANGER_COOLDOWN,
+          duration: 2.9,
+        });
+        if (shown) this.characterDialogue.offroadDangerTime = 0;
+      }
+    } else {
+      this.characterDialogue.offroadDangerTime = Math.max(0, this.characterDialogue.offroadDangerTime - delta * 1.6);
+    }
+  }
+
+  updateCharacterRaceDialogue() {
+    const characterOpponent = this.getActiveCharacterOpponent();
+    if (!this.activeCharacter || !this.player || !characterOpponent) return;
+
+    const playerAhead = this.player.unwrappedProgress > characterOpponent.unwrappedProgress + 0.004;
+    if (this.characterDialogue.lastPlayerAhead === null) {
+      this.characterDialogue.lastPlayerAhead = playerAhead;
+      return;
+    }
+    if (playerAhead === this.characterDialogue.lastPlayerAhead) return;
+
+    this.characterDialogue.lastPlayerAhead = playerAhead;
+    this.showCharacterDialogue(playerAhead ? 'overtaken' : 'overtake', {
+      force: true,
+      cooldown: CHARACTER_OVERTAKE_COOLDOWN,
+      duration: 2.8,
     });
   }
 
@@ -1586,7 +2324,10 @@ ${opponentMarkers}
       ? this.player.rearSlip
         * smoothStep(1.1, 6.5, Math.abs(lateralSpeed))
         * smoothStep(7, 15, Math.abs(forwardSpeed))
-      : 0;
+      : Math.max(
+        smoothStep(5, 18, Math.abs(forwardSpeed)) * 0.24,
+        smoothStep(2, 8, Math.abs(lateralSpeed)) * smoothStep(4, 14, Math.abs(forwardSpeed)) * 0.86,
+      );
 
     if (driftAmount < 0.1) {
       this.smokeEmitAccumulator = 0;
@@ -1597,15 +2338,15 @@ ${opponentMarkers}
     while (this.smokeEmitAccumulator >= 1) {
       this.smokeEmitAccumulator -= 1;
       const side = Math.random() < 0.5 ? -1 : 1;
-      this.spawnSmokePuff(side, driftAmount, lateralSpeed);
+      this.spawnSmokePuff(side, driftAmount, lateralSpeed, onRoad);
 
       if (driftAmount > 0.55 && Math.random() < 0.35) {
-        this.spawnSmokePuff(-side, driftAmount, lateralSpeed);
+        this.spawnSmokePuff(-side, driftAmount, lateralSpeed, onRoad);
       }
     }
   }
 
-  spawnSmokePuff(side, driftAmount, lateralSpeed) {
+  spawnSmokePuff(side, driftAmount, lateralSpeed, onRoad) {
     if (this.smokeParticles.length >= MAX_SMOKE_PARTICLES) {
       this.removeSmokeParticle(0);
     }
@@ -1619,17 +2360,18 @@ ${opponentMarkers}
     const jitter = (Math.random() - 0.5) * 0.42;
     const x = this.player.x + headingSin * rearOffset + rightX * (sideOffset + jitter);
     const z = this.player.z + headingCos * rearOffset + rightZ * (sideOffset + jitter);
-    const scale = THREE.MathUtils.lerp(1.05, 1.75, driftAmount) * (0.84 + Math.random() * 0.28);
+    const surfaceY = this.getSurfaceY(x, z);
+    const scale = THREE.MathUtils.lerp(onRoad ? 1.05 : 1.2, onRoad ? 1.75 : 2.35, driftAmount) * (0.84 + Math.random() * 0.28);
 
     const material = new THREE.SpriteMaterial({
       map: this.smokeTexture,
-      color: 0xd8d4ca,
+      color: onRoad ? 0xd8d4ca : 0xd6b16b,
       transparent: true,
-      opacity: THREE.MathUtils.lerp(0.1, 0.24, driftAmount),
+      opacity: THREE.MathUtils.lerp(onRoad ? 0.1 : 0.14, onRoad ? 0.24 : 0.34, driftAmount),
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(material);
-    sprite.position.set(x, 0.7 + Math.random() * 0.18, z);
+    sprite.position.set(x, surfaceY + 0.56 + Math.random() * 0.22, z);
     sprite.scale.set(scale, scale, scale);
     this.scene.add(sprite);
 
@@ -1640,10 +2382,10 @@ ${opponentMarkers}
       life: THREE.MathUtils.lerp(0.48, 0.78, driftAmount) * (0.9 + Math.random() * 0.22),
       opacity: material.opacity,
       startScale: scale,
-      endScale: scale * THREE.MathUtils.lerp(2.0, 2.85, driftAmount),
-      vx: -this.player.vx * 0.035 + rightX * driftDirection * 0.28 + (Math.random() - 0.5) * 0.55,
-      vz: -this.player.vz * 0.035 + rightZ * driftDirection * 0.28 + (Math.random() - 0.5) * 0.55,
-      rise: 0.22 + Math.random() * 0.16,
+      endScale: scale * THREE.MathUtils.lerp(onRoad ? 2.0 : 2.55, onRoad ? 2.85 : 3.45, driftAmount),
+      vx: -this.player.vx * (onRoad ? 0.035 : 0.055) + rightX * driftDirection * 0.28 + SAND_WIND.x * (onRoad ? 0.18 : 0.58) + (Math.random() - 0.5) * 0.55,
+      vz: -this.player.vz * (onRoad ? 0.035 : 0.055) + rightZ * driftDirection * 0.28 + SAND_WIND.z * (onRoad ? 0.18 : 0.58) + (Math.random() - 0.5) * 0.55,
+      rise: (onRoad ? 0.22 : 0.34) + Math.random() * 0.18,
     });
   }
 
@@ -1683,6 +2425,101 @@ ${opponentMarkers}
     this.smokeEmitAccumulator = 0;
   }
 
+  spawnSandWisp() {
+    if (!this.player || !this.sandWispTexture) return;
+    if (this.sandWisps.length >= MAX_SAND_WISPS) {
+      this.removeSandWisp(0);
+    }
+
+    const crossWind = new THREE.Vector3(-SAND_WIND.z, 0, SAND_WIND.x);
+    const ahead = 28 + Math.random() * SAND_WISP_SPAWN_RADIUS;
+    const side = (Math.random() - 0.5) * SAND_WISP_SPAWN_RADIUS * 1.5;
+    const x = this.player.x - SAND_WIND.x * ahead + crossWind.x * side;
+    const z = this.player.z - SAND_WIND.z * ahead + crossWind.z * side;
+    const groundY = this.getAmbientGroundY(x, z);
+    const scaleX = 13 + Math.random() * 22;
+    const scaleY = 1.3 + Math.random() * 2.8;
+    const opacity = 0.05 + Math.random() * 0.09;
+
+    const material = new THREE.SpriteMaterial({
+      map: this.sandWispTexture,
+      color: 0xf0c777,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(x, groundY + 0.35 + Math.random() * 1.15, z);
+    sprite.scale.set(scaleX, scaleY, 1);
+    this.scene.add(sprite);
+
+    this.sandWisps.push({
+      sprite,
+      age: 0,
+      life: 2.8 + Math.random() * 2.2,
+      opacity,
+      scaleX,
+      scaleY,
+      speed: 11 + Math.random() * 10,
+      sway: (Math.random() - 0.5) * 0.65,
+    });
+  }
+
+  updateAmbientSand(delta) {
+    if (!this.player || !this.scene) return;
+
+    this.sandWispEmitAccumulator += delta * SAND_WISP_SPAWN_RATE;
+    while (this.sandWispEmitAccumulator >= 1) {
+      this.sandWispEmitAccumulator -= 1;
+      this.spawnSandWisp();
+    }
+
+    for (let i = this.sandWisps.length - 1; i >= 0; i -= 1) {
+      const wisp = this.sandWisps[i];
+      wisp.age += delta;
+      const distanceFromPlayer = Math.hypot(
+        wisp.sprite.position.x - this.player.x,
+        wisp.sprite.position.z - this.player.z,
+      );
+
+      if (wisp.age >= wisp.life || distanceFromPlayer > SAND_WISP_DESPAWN_DISTANCE) {
+        this.removeSandWisp(i);
+        continue;
+      }
+
+      const t = wisp.age / wisp.life;
+      const fadeIn = smoothStep(0, 0.18, t);
+      const fadeOut = 1 - smoothStep(0.62, 1, t);
+      const speed = wisp.speed * (1 + t * 0.45);
+      wisp.sprite.position.x += (SAND_WIND.x * speed + wisp.sway) * delta;
+      wisp.sprite.position.z += (SAND_WIND.z * speed - wisp.sway * 0.35) * delta;
+      wisp.sprite.position.y = this.getAmbientGroundY(wisp.sprite.position.x, wisp.sprite.position.z)
+        + 0.38
+        + Math.sin(wisp.age * 4.2 + wisp.scaleX) * 0.18;
+      wisp.sprite.scale.set(
+        wisp.scaleX * (1 + t * 0.55),
+        wisp.scaleY * (1 + t * 0.28),
+        1,
+      );
+      wisp.sprite.material.opacity = wisp.opacity * fadeIn * fadeOut;
+    }
+  }
+
+  removeSandWisp(index) {
+    const [wisp] = this.sandWisps.splice(index, 1);
+    if (!wisp) return;
+
+    this.scene.remove(wisp.sprite);
+    wisp.sprite.material.dispose();
+  }
+
+  clearSandWisps() {
+    while (this.sandWisps.length > 0) {
+      this.removeSandWisp(this.sandWisps.length - 1);
+    }
+    this.sandWispEmitAccumulator = 0;
+  }
+
   spawnTumbleweed() {
     if (!this.tumbleweedPrototype || !this.player) return;
 
@@ -1699,7 +2536,7 @@ ${opponentMarkers}
       .addScaledVector(crossWind, (Math.random() - 0.5) * 122);
 
     root.add(visual);
-    root.position.set(start.x, TRACK.roadY + radius, start.z);
+    root.position.set(start.x, this.getGroundY(start.x, start.z) + radius, start.z);
     root.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
     this.scene.add(root);
 
@@ -1742,7 +2579,7 @@ ${opponentMarkers}
       tumbleweed.root.position.x += tumbleweed.sideAxis.x * skitterDelta;
       tumbleweed.root.position.z += tumbleweed.sideAxis.z * skitterDelta;
       tumbleweed.previousSkitterOffset = skitterOffset;
-      tumbleweed.root.position.y = TRACK.roadY
+      tumbleweed.root.position.y = this.getGroundY(tumbleweed.root.position.x, tumbleweed.root.position.z)
         + tumbleweed.radius
         + bounceLift * tumbleweed.bounceHeight;
       tumbleweed.root.rotateOnWorldAxis(
@@ -1809,6 +2646,12 @@ ${opponentMarkers}
         this.completeRace();
         return true;
       }
+      if (this.player.laps === RACE_LAPS - 1) {
+        this.showLimitedRaceDialogue('finalLap', {
+          force: true,
+          duration: 3.3,
+        });
+      }
       this.player.lapStartedAt = performance.now();
       this.sfx.playOneShot('checkpointBell', 0.54);
     }
@@ -1818,11 +2661,26 @@ ${opponentMarkers}
   completeRace() {
     if (this.raceFinished) return;
 
+    const playerRank = this.getPlayerRank();
+    const playerWon = playerRank === 1;
+    const defeatAffinityStage = this.getActiveCharacterAffinity();
+    this.lastRaceResult = {
+      playerRank,
+      playerWon,
+      defeatAffinityStage,
+    };
+    if (playerWon) {
+      this.addActiveCharacterAffinity();
+    }
+
     this.raceStarted = false;
     this.raceFinished = true;
     this.countdown.active = false;
     this.setPausedState(false);
+    this.clearTouchControls();
+    this.gameShell?.classList.remove('is-race-interface-active');
     this.countdownScreen?.classList.add('is-hidden');
+    this.hideCharacterDialogue();
     this.player.finishedAt = performance.now();
     this.player.vx = 0;
     this.player.vz = 0;
@@ -1840,9 +2698,34 @@ ${opponentMarkers}
 
     const finishTime = this.player.finishedAt ?? performance.now();
     const totalTime = (finishTime - this.player.raceStartedAt) / 1000;
+    const playerRank = this.lastRaceResult?.playerRank ?? this.getPlayerRank();
+    const playerWon = this.lastRaceResult?.playerWon ?? playerRank === 1;
+    if (this.finishTitle) {
+      this.finishTitle.textContent = playerWon ? 'You Won The Race' : `${ordinalPlace(playerRank)} Place Finish`;
+    }
+    this.finishStats.result.textContent = playerWon ? 'WIN' : `${playerRank}/${OPPONENT_COUNT + 1}`;
     this.finishStats.total.textContent = formatLapTime(totalTime);
     this.finishStats.best.textContent = formatLapTime(this.player.bestLap);
     this.finishStats.nitro.textContent = `${Math.round(this.player.nitro * 100)}%`;
+    this.updateFinishCharacterLine(playerWon);
+  }
+
+  updateFinishCharacterLine(playerWon) {
+    if (!this.activeCharacter || !this.finishCharacter?.root) return;
+
+    const eventKey = playerWon ? 'defeat' : 'victory';
+    const affinityStage = this.lastRaceResult?.defeatAffinityStage ?? this.getActiveCharacterAffinity();
+    const expression = playerWon
+      ? this.activeCharacter.expressions.defeat
+      : this.activeCharacter.expressions.victory;
+    const line = this.pickCharacterLine(eventKey, { affinityStage });
+    const portrait = this.getCharacterPortrait(expression);
+
+    this.finishCharacter.root.classList.toggle('is-player-win', playerWon);
+    this.finishCharacter.name.textContent = `${this.activeCharacter.name}  BOND ${this.getActiveCharacterAffinity()}/${CHARACTER_AFFECTION_MAX}`;
+    this.finishCharacter.line.textContent = line;
+    this.finishCharacter.portrait.src = portrait;
+    this.finishCharacter.portrait.alt = this.activeCharacter.name;
   }
 
   estimateTrackTurn(progress, lookAhead = 0.018) {
@@ -1926,6 +2809,8 @@ ${opponentMarkers}
     const lineOffset = this.getOpponentLineOffset(opponent, delta);
     const point = pose.point.clone().addScaledVector(pose.normal, lineOffset);
     const nextPoint = nextPose.point.clone().addScaledVector(nextPose.normal, lineOffset);
+    point.y = this.getSurfaceY(point.x, point.z);
+    nextPoint.y = this.getSurfaceY(nextPoint.x, nextPoint.z);
 
     return {
       point,
@@ -1950,8 +2835,9 @@ ${opponentMarkers}
     const speedStep = (targetSpeed < opponent.speed ? 0.13 : 0.032) * delta;
     opponent.speed = moveToward(opponent.speed, targetSpeed, speedStep);
     opponent.hitCooldown = Math.max(0, opponent.hitCooldown - delta);
+    const recovering = opponent.recovering || opponent.recoveryTime > 0;
     const nextProgress = THREE.MathUtils.euclideanModulo(
-      opponent.progress + opponent.speed * delta * (opponent.recoveryTime > 0 ? 0.64 : 1),
+      opponent.progress + opponent.speed * delta * (recovering ? 0.64 : 1),
       1,
     );
     let deltaProgress = nextProgress - opponent.lastProgress;
@@ -1967,12 +2853,13 @@ ${opponentMarkers}
     const current = target.point;
     const trackHeading = target.heading;
 
-    if (opponent.recoveryTime <= 0) {
+    if (!recovering) {
       opponent.x = current.x;
+      opponent.y = current.y;
       opponent.z = current.z;
       opponent.vx = 0;
       opponent.vz = 0;
-      root.position.set(current.x, 0, current.z);
+      root.position.set(current.x, current.y, current.z);
       root.rotation.y = trackHeading;
       return;
     }
@@ -1992,18 +2879,26 @@ ${opponentMarkers}
     opponent.recoveryTime = Math.max(0, opponent.recoveryTime - delta);
 
     const knockbackSpeed = Math.hypot(opponent.vx, opponent.vz);
-    if (returnDistance < 1.5 && knockbackSpeed < 2.6 && opponent.recoveryTime < 1.25) {
+    if (
+      returnDistance < OPPONENT_RECOVERY_SNAP_DISTANCE
+      && knockbackSpeed < OPPONENT_RECOVERY_SNAP_SPEED
+    ) {
       opponent.x = current.x;
+      opponent.y = current.y;
       opponent.z = current.z;
       opponent.vx = 0;
       opponent.vz = 0;
+      opponent.recovering = false;
       opponent.recoveryTime = 0;
-      root.position.set(current.x, 0, current.z);
+      root.position.set(current.x, current.y, current.z);
       root.rotation.y = trackHeading;
       return;
     }
 
-    root.position.set(opponent.x, 0, opponent.z);
+    opponent.recovering = true;
+    opponent.y = this.getSurfaceY(opponent.x, opponent.z);
+
+    root.position.set(opponent.x, opponent.y, opponent.z);
     root.rotation.y = knockbackSpeed > 0.4
       ? Math.atan2(opponent.vx, opponent.vz)
       : trackHeading;
@@ -2034,7 +2929,9 @@ ${opponentMarkers}
     opponent.x = root.position.x;
     opponent.z = root.position.z;
 
+    const freshContact = opponent.hitCooldown <= 0;
     if (opponent.hitCooldown <= 0) {
+      opponent.recovering = true;
       opponent.recoveryTime = OPPONENT_RECOVERY_TIME;
       opponent.hitCooldown = OPPONENT_HIT_COOLDOWN;
       this.sfx.playOneShot('hitWoodMetal', THREE.MathUtils.clamp(impactSpeed / 18, 0.36, 0.82), {
@@ -2044,8 +2941,16 @@ ${opponentMarkers}
       opponent.z -= normalZ * (overlap * 0.45 + 0.16);
       opponent.vx = (opponent.vx ?? 0) - normalX * impactSpeed + this.player.vx * 0.22;
       opponent.vz = (opponent.vz ?? 0) - normalZ * impactSpeed + this.player.vz * 0.22;
+      opponent.y = this.getSurfaceY(opponent.x, opponent.z);
       opponent.speed *= 0.72;
-      root.position.set(opponent.x, 0, opponent.z);
+      root.position.set(opponent.x, opponent.y, opponent.z);
+    }
+    if (freshContact && this.isActiveCharacterOpponent(opponent)) {
+      this.showCharacterDialogue('contact', {
+        force: true,
+        cooldown: 2.4,
+        duration: 2.7,
+      });
     }
 
     if (normalSpeed < 0) {
@@ -2060,15 +2965,17 @@ ${opponentMarkers}
     this.player.rearSlip = Math.max(this.player.rearSlip, 0.35);
 
     this.keepInsideWorld();
-    this.playerRoot.position.set(this.player.x, 0, this.player.z);
+    this.player.y = this.getSurfaceY(this.player.x, this.player.z);
+    this.playerRoot.position.set(this.player.x, this.player.y, this.player.z);
   }
 
   updateCamera(delta) {
     const forward = new THREE.Vector3(Math.sin(this.player.heading), 0, Math.cos(this.player.heading));
-    const desired = new THREE.Vector3(this.player.x, 0, this.player.z)
+    const playerY = this.player.y ?? this.getSurfaceY(this.player.x, this.player.z);
+    const desired = new THREE.Vector3(this.player.x, playerY, this.player.z)
       .addScaledVector(forward, -31)
       .add(new THREE.Vector3(0, 43, 0));
-    const target = new THREE.Vector3(this.player.x, 1.4, this.player.z).addScaledVector(forward, 8);
+    const target = new THREE.Vector3(this.player.x, playerY + 1.4, this.player.z).addScaledVector(forward, 8);
 
     this.camera.position.lerp(desired, 1 - Math.exp(-6 * delta));
     this.camera.lookAt(target);
@@ -2077,18 +2984,40 @@ ${opponentMarkers}
   updateHud() {
     const hudNow = this.player.finishedAt ?? performance.now();
     const currentLap = (hudNow - this.player.lapStartedAt) / 1000;
-    this.hud.speed.textContent = `${Math.round(Math.abs(this.player.speed) * 4.6)}`;
-    this.hud.lap.textContent = `${this.player.laps}/${RACE_LAPS}`;
-    this.hud.current.textContent = formatLapTime(currentLap);
-    this.hud.best.textContent = formatLapTime(this.player.bestLap);
-    this.hud.nitro?.style.setProperty('--nitro-fill', `${(this.player.nitro * 58).toFixed(1)}%`);
-    this.hud.nitro?.classList.toggle('is-active', this.player.nitroActive);
+    const displayedSpeed = Math.round(Math.abs(this.player.speed) * 4.6);
+    const speedMeterFill = THREE.MathUtils.clamp(
+      displayedSpeed / (PLAYER_ROAD_MAX_SPEED * 4.6),
+      0,
+      1,
+    ) * 100;
+    const nitroMeterFill = this.player.nitro * 100;
+    const nitroGaugeFill = this.player.nitro * 58;
+
+    this.hud.speed.forEach((element) => {
+      element.textContent = `${displayedSpeed}`;
+    });
+    this.hud.lap.forEach((element) => {
+      element.textContent = `${this.player.laps}/${RACE_LAPS}`;
+    });
+    this.hud.current.forEach((element) => {
+      element.textContent = formatLapTime(currentLap);
+    });
+    this.hud.best.forEach((element) => {
+      element.textContent = formatLapTime(this.player.bestLap);
+    });
+    this.hud.speedMeters.forEach((element) => {
+      element.style.setProperty('--meter-fill', `${speedMeterFill.toFixed(1)}%`);
+    });
+    this.hud.nitro.forEach((element) => {
+      element.style.setProperty('--nitro-fill', `${nitroGaugeFill.toFixed(1)}%`);
+      element.style.setProperty('--meter-fill', `${nitroMeterFill.toFixed(1)}%`);
+      element.classList.toggle('is-active', this.player.nitroActive);
+    });
     this.updatePositionBoard();
   }
 
-  updatePositionBoard() {
-    if (!this.positionBoard?.number || !this.positionBoard?.list || !this.player || !this.opponents) return;
-
+  getRaceRankings() {
+    if (!this.player || !this.opponents) return [];
     const racers = [
       {
         id: 'player',
@@ -2101,16 +3030,36 @@ ${opponentMarkers}
         progress: opponent.unwrappedProgress,
       })),
     ].sort((a, b) => b.progress - a.progress);
+
+    return racers;
+  }
+
+  getPlayerRank() {
+    const racers = this.getRaceRankings();
+    return racers.findIndex((racer) => racer.id === 'player') + 1;
+  }
+
+  updatePositionBoard() {
+    if (!this.positionBoard || !this.player || !this.opponents) return;
+
+    const racers = this.getRaceRankings();
     const playerRank = racers.findIndex((racer) => racer.id === 'player') + 1;
 
-    this.positionBoard.number.innerHTML = `${playerRank}<span>/${racers.length}</span> <em>POS.</em>`;
-    this.positionBoard.list.innerHTML = racers
-      .map((racer, index) => `
-        <li class="${racer.id === 'player' ? 'is-you' : ''}">
-          <span>${index + 1}</span> ${racer.name}
-        </li>
-      `)
-      .join('');
+    if (this.positionBoard.number) {
+      this.positionBoard.number.innerHTML = `${playerRank}<span>/${racers.length}</span> <em>POS.</em>`;
+    }
+    if (this.positionBoard.mobileNumber) {
+      this.positionBoard.mobileNumber.textContent = `${playerRank}/${racers.length}`;
+    }
+    if (this.positionBoard.list) {
+      this.positionBoard.list.innerHTML = racers
+        .map((racer, index) => `
+          <li class="${racer.id === 'player' ? 'is-you' : ''}">
+            <span>${index + 1}</span> ${racer.name}
+          </li>
+        `)
+        .join('');
+    }
   }
 
   updateAssetStatus() {
@@ -2209,6 +3158,7 @@ ${opponentMarkers}
     this.updateGamepadInput();
     if (!this.paused.active) {
       this.updateCountdown();
+      this.updateAmbientSand(delta);
     }
 
     if (this.raceStarted && !this.paused.active) {
@@ -2216,6 +3166,7 @@ ${opponentMarkers}
       if (this.raceStarted) {
         this.opponents.forEach((opponent) => this.updateOpponent(opponent, delta));
         this.opponents.forEach((opponent) => this.handleOpponentCollision(opponent));
+        this.updateCharacterRaceDialogue();
         this.updateSmoke(delta);
         this.updateTumbleweeds(delta);
       }
@@ -2224,6 +3175,7 @@ ${opponentMarkers}
       this.updateCourseMap();
     }
 
+    this.updateCharacterDialogueVisibility();
     this.renderer.render(this.scene, this.camera);
     this.animationId = window.requestAnimationFrame(() => this.animate());
   }
@@ -2242,12 +3194,24 @@ ${opponentMarkers}
     this.carPicker?.removeEventListener('click', this.onVehiclePick);
     this.restartButton?.removeEventListener('click', this.onRestartRace);
     this.pauseButton?.removeEventListener('click', this.onPauseToggle);
+    this.touchButtons?.forEach((button) => {
+      button.removeEventListener('pointerdown', this.onTouchControlPointerDown);
+      button.removeEventListener('pointerup', this.onTouchControlPointerUp);
+      button.removeEventListener('pointercancel', this.onTouchControlPointerUp);
+      button.removeEventListener('lostpointercapture', this.onTouchControlPointerUp);
+    });
+    this.touchStick?.removeEventListener('pointerdown', this.onTouchStickPointerDown);
+    this.touchStick?.removeEventListener('pointermove', this.onTouchStickPointerMove);
+    this.touchStick?.removeEventListener('pointerup', this.onTouchStickPointerUp);
+    this.touchStick?.removeEventListener('pointercancel', this.onTouchStickPointerUp);
+    this.touchStick?.removeEventListener('lostpointercapture', this.onTouchStickPointerUp);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('gamepadconnected', this.onGamepadConnected);
     window.removeEventListener('gamepaddisconnected', this.onGamepadDisconnected);
     window.removeEventListener('resize', this.onResize);
     this.clearSmoke();
+    this.clearSandWisps();
     this.clearTumbleweeds();
     this.backgroundSceneryRoot?.removeFromParent();
     this.backgroundSceneryRoot = null;
@@ -2255,6 +3219,7 @@ ${opponentMarkers}
     this.bgmAudio = null;
     this.sfx.dispose();
     this.smokeTexture?.dispose();
+    this.sandWispTexture?.dispose();
     this.renderer.dispose();
   }
 }
