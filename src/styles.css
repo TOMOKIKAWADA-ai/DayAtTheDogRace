@@ -1573,8 +1573,8 @@ body {
     bottom: auto;
     left: 10px;
     width: auto;
-    min-height: 92px;
-    grid-template-columns: 112px minmax(0, 1fr);
+    min-height: 68px;
+    grid-template-columns: 58px minmax(0, 1fr);
     gap: 8px;
     padding: 0;
     transform: none;
@@ -1585,13 +1585,13 @@ body {
   }
 
   .character-portrait {
-    width: 112px;
-    height: 136px;
-    margin: -40px 0 -12px -12px;
+    width: 56px;
+    height: 68px;
+    margin: -12px 0 -4px -2px;
   }
 
   .character-portrait img {
-    transform: translateY(13%) scale(1.36);
+    transform: translateY(10%) scale(1.16);
   }
 
   .character-meta {
@@ -1606,14 +1606,14 @@ body {
   }
 
   .finish-character {
-    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr);
     gap: 10px;
     padding: 8px;
   }
 
   .finish-character-portrait {
-    width: 68px;
-    height: 86px;
+    width: 34px;
+    height: 43px;
   }
 
   .finish-character-copy p {
