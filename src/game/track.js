@@ -36,8 +36,9 @@ const CENTER_POINTS = [
 
 const GROUND_WIDTH = 760;
 const GROUND_DEPTH = 1020;
-const GROUND_SEGMENTS_X = 96;
-const GROUND_SEGMENTS_Z = 132;
+const DEFAULT_GROUND_SEGMENTS_X = 96;
+const DEFAULT_GROUND_SEGMENTS_Z = 132;
+const DEFAULT_TRACK_SAMPLE_COUNT = 1800;
 const ROAD_EDGE_LIFT_BLEND = 5.5;
 const GROUND_UNDER_ROAD_CLEARANCE = 0.42;
 const GROUND_UNDER_ROAD_BLEND = 10;
@@ -97,7 +98,7 @@ function makeCenterCurve() {
   return new THREE.CatmullRomCurve3(points, true, 'centripetal');
 }
 
-function createSamples(curve, count = 1800) {
+function createSamples(curve, count = DEFAULT_TRACK_SAMPLE_COUNT) {
   const samples = [];
   let length = 0;
 
@@ -232,12 +233,12 @@ function createRoadShoulderGeometry(samples, totalLength, roadWidth, shoulderWid
   return geometry;
 }
 
-function addStartLine(scene, samples, totalLength) {
+function addStartLine(scene, samples, totalLength, options = {}) {
   const start = pointAtDistance(samples, totalLength, 0);
   const lineLength = 2.55;
   const halfLength = lineLength / 2;
   const halfWidth = TRACK.roadWidth / 2;
-  const texture = createStartLineTexture();
+  const texture = createStartLineTexture(options.textureAnisotropy);
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
@@ -279,19 +280,19 @@ function addStartLine(scene, samples, totalLength) {
   scene.add(line);
 }
 
-function createStartLineTexture() {
+function createStartLineTexture(anisotropy = 8) {
   const texture = new THREE.TextureLoader().load('/assets/ui/start-finish-line.png?v=2');
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
+  texture.anisotropy = anisotropy;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   return texture;
 }
 
-function createRoadLineMaterial(path) {
+function createRoadLineMaterial(path, anisotropy = 8) {
   const texture = new THREE.TextureLoader().load(path);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
+  texture.anisotropy = anisotropy;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.RepeatWrapping;
 
@@ -348,9 +349,10 @@ function createRoadLineStripGeometry(samples, totalLength, offset, width, height
   return geometry;
 }
 
-function addHighwayLines(scene, samples, totalLength) {
-  const yellowMaterial = createRoadLineMaterial('/assets/ui/roadline-center-spaced.png?v=3');
-  const whiteMaterial = createRoadLineMaterial('/assets/ui/roadline-white.png?v=4');
+function addHighwayLines(scene, samples, totalLength, options = {}) {
+  const lineAnisotropy = options.textureAnisotropy ?? 8;
+  const yellowMaterial = createRoadLineMaterial('/assets/ui/roadline-center-spaced.png?v=3', lineAnisotropy);
+  const whiteMaterial = createRoadLineMaterial('/assets/ui/roadline-white.png?v=4', lineAnisotropy);
   const centerPatchWidth = 0.72;
   const edgePatchWidth = 2.95;
   const halfWidth = TRACK.roadWidth / 2 - 1.05;
@@ -407,8 +409,8 @@ function nearestTrackPosition(samples, totalLength, x, z) {
   };
 }
 
-function createGroundGeometry(samples, totalLength) {
-  const geometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH, GROUND_SEGMENTS_X, GROUND_SEGMENTS_Z);
+function createGroundGeometry(samples, totalLength, segmentsX = DEFAULT_GROUND_SEGMENTS_X, segmentsZ = DEFAULT_GROUND_SEGMENTS_Z) {
+  const geometry = new THREE.PlaneGeometry(GROUND_WIDTH, GROUND_DEPTH, segmentsX, segmentsZ);
   const positions = geometry.attributes.position;
 
   for (let i = 0; i < positions.count; i += 1) {
@@ -423,52 +425,82 @@ function createGroundGeometry(samples, totalLength) {
   return geometry;
 }
 
-export function createTrack(scene, textures) {
-  const grassMaterial = new THREE.MeshStandardMaterial({
-    map: textures.grass,
-    color: 0xffffff,
-    roughness: 0.96,
-  });
-  const roadMaterial = new THREE.MeshStandardMaterial({
-    map: textures.road,
-    color: 0xffffff,
-    roughness: 0.94,
-    metalness: 0.02,
-    side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  });
-  const shoulderMaterial = new THREE.MeshStandardMaterial({
-    map: textures.roadEdge,
-    color: 0xffffff,
-    roughness: 0.98,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
+export function createTrack(scene, textures, options = {}) {
+  const simpleMaterials = Boolean(options.simpleMaterials);
+  const grassMaterial = simpleMaterials
+    ? new THREE.MeshLambertMaterial({
+      map: textures.grass,
+      color: 0xffffff,
+    })
+    : new THREE.MeshStandardMaterial({
+      map: textures.grass,
+      color: 0xffffff,
+      roughness: 0.96,
+    });
+  const roadMaterial = simpleMaterials
+    ? new THREE.MeshLambertMaterial({
+      map: textures.road,
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    })
+    : new THREE.MeshStandardMaterial({
+      map: textures.road,
+      color: 0xffffff,
+      roughness: 0.94,
+      metalness: 0.02,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+  const shoulderMaterial = simpleMaterials
+    ? new THREE.MeshLambertMaterial({
+      map: textures.roadEdge,
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+    })
+    : new THREE.MeshStandardMaterial({
+      map: textures.roadEdge,
+      color: 0xffffff,
+      roughness: 0.98,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
 
   const curve = makeCenterCurve();
-  const { samples, totalLength } = createSamples(curve);
+  const { samples, totalLength } = createSamples(curve, options.sampleCount ?? DEFAULT_TRACK_SAMPLE_COUNT);
+  const receiveShadows = options.receiveShadows ?? true;
 
-  const ground = new THREE.Mesh(createGroundGeometry(samples, totalLength), grassMaterial);
+  const ground = new THREE.Mesh(
+    createGroundGeometry(
+      samples,
+      totalLength,
+      options.groundSegmentsX ?? DEFAULT_GROUND_SEGMENTS_X,
+      options.groundSegmentsZ ?? DEFAULT_GROUND_SEGMENTS_Z,
+    ),
+    grassMaterial,
+  );
   ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
+  ground.receiveShadow = receiveShadows;
   scene.add(ground);
 
   const visualShoulderWidth = TRACK.visualShoulderWidth ?? TRACK.shoulderWidth;
 
   for (const side of [-1, 1]) {
     const shoulder = new THREE.Mesh(createRoadShoulderGeometry(samples, totalLength, TRACK.roadWidth, visualShoulderWidth, side), shoulderMaterial);
-    shoulder.receiveShadow = true;
+    shoulder.receiveShadow = receiveShadows;
     scene.add(shoulder);
   }
 
   const road = new THREE.Mesh(createRoadGeometry(samples, totalLength, TRACK.roadWidth), roadMaterial);
-  road.receiveShadow = true;
+  road.receiveShadow = receiveShadows;
   scene.add(road);
 
-  addHighwayLines(scene, samples, totalLength);
-  addStartLine(scene, samples, totalLength);
+  addHighwayLines(scene, samples, totalLength, options);
+  addStartLine(scene, samples, totalLength, options);
 
   return {
     centerPoint(progress) {

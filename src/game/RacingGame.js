@@ -286,8 +286,21 @@ const PERFORMANCE_SETTINGS = {
   desktop: {
     antialias: true,
     pixelRatioCap: 1.5,
+    toneMapping: true,
+    fogEnabled: true,
+    textureAnisotropy: 8,
+    trackSampleCount: 1800,
+    groundSegmentsX: 96,
+    groundSegmentsZ: 132,
+    trackSimpleMaterials: false,
     shadowsEnabled: true,
     shadowMapSize: 1024,
+    loadHdriEnvironment: true,
+    loadBackgroundScenery: true,
+    loadTumbleweed: true,
+    loadOpponentVehicleModels: true,
+    simpleVehicleMaterials: false,
+    fallbackTireSegments: 18,
     courseSceneryCount: 60,
     fixedSceneryStep: 1,
     maxSmokeParticles: 36,
@@ -297,21 +310,38 @@ const PERFORMANCE_SETTINGS = {
     maxTumbleweeds: 4,
     tumbleweedSpawnMin: 2.0,
     tumbleweedSpawnMax: 4.2,
+    updateCourseMap: true,
+    gamepadPollInterval: 0,
   },
   mobile: {
     antialias: false,
-    pixelRatioCap: 1,
+    pixelRatioCap: 0.75,
+    toneMapping: false,
+    fogEnabled: false,
+    textureAnisotropy: 1,
+    trackSampleCount: 720,
+    groundSegmentsX: 44,
+    groundSegmentsZ: 60,
+    trackSimpleMaterials: true,
     shadowsEnabled: false,
     shadowMapSize: 512,
-    courseSceneryCount: 28,
-    fixedSceneryStep: 2,
-    maxSmokeParticles: 18,
-    smokeEmitScale: 0.45,
-    maxSandWisps: 12,
-    sandWispSpawnRate: 2.2,
-    maxTumbleweeds: 2,
-    tumbleweedSpawnMin: 3.2,
-    tumbleweedSpawnMax: 5.8,
+    loadHdriEnvironment: false,
+    loadBackgroundScenery: false,
+    loadTumbleweed: false,
+    loadOpponentVehicleModels: false,
+    simpleVehicleMaterials: true,
+    fallbackTireSegments: 10,
+    courseSceneryCount: 0,
+    fixedSceneryStep: 4,
+    maxSmokeParticles: 8,
+    smokeEmitScale: 0.18,
+    maxSandWisps: 0,
+    sandWispSpawnRate: 0,
+    maxTumbleweeds: 0,
+    tumbleweedSpawnMin: 6,
+    tumbleweedSpawnMax: 9,
+    updateCourseMap: false,
+    gamepadPollInterval: 0.05,
   },
 };
 const COURSE_SCENERY_MODELS = [
@@ -609,6 +639,7 @@ export class RacingGame {
       menuAxis: 0,
       selectionIndex: 0,
     };
+    this.gamepadPollAccumulator = 0;
     this.touchInput = {
       activeControls: new Map(),
       stickPointerId: null,
@@ -637,12 +668,18 @@ export class RacingGame {
     this.createScene();
     this.bindEvents();
 
+    const environmentTask = this.performanceSettings.loadHdriEnvironment
+      ? loadHdriEnvironment(this.renderer)
+      : Promise.resolve({ texture: null, source: 'mobile lights' });
     const [roadResult, grassResult, environmentResult] = await Promise.all([
       loadTextureOrFallback(ASSETS.textures.road, createRoadFallbackTexture, 1, 1),
       loadTextureOrFallback(ASSETS.textures.grass, createGrassFallbackTexture, 18, 18),
-      loadHdriEnvironment(this.renderer),
+      environmentTask,
     ]);
     const roadEdgeTexture = createRoadEdgeFallbackTexture();
+    this.applyTextureQuality(roadResult.texture);
+    this.applyTextureQuality(grassResult.texture);
+    this.applyTextureQuality(roadEdgeTexture);
 
     if (environmentResult.texture) {
       this.scene.environment = environmentResult.texture;
@@ -661,14 +698,30 @@ export class RacingGame {
       road: roadResult.texture,
       roadEdge: roadEdgeTexture,
       grass: grassResult.texture,
+    }, {
+      sampleCount: this.performanceSettings.trackSampleCount,
+      groundSegmentsX: this.performanceSettings.groundSegmentsX,
+      groundSegmentsZ: this.performanceSettings.groundSegmentsZ,
+      simpleMaterials: this.performanceSettings.trackSimpleMaterials,
+      receiveShadows: this.performanceSettings.shadowsEnabled,
+      textureAnisotropy: this.performanceSettings.textureAnisotropy,
     });
     this.createCourseMap();
 
     this.createVehicles();
-    await Promise.all([
-      this.loadTumbleweedModel(),
-      this.loadBackgroundScenery(),
-    ]);
+    const sceneryTasks = [];
+    if (this.performanceSettings.loadTumbleweed) {
+      sceneryTasks.push(this.loadTumbleweedModel());
+    } else {
+      this.assetMessages.push('tumbleweed: mobile disabled');
+    }
+    if (this.performanceSettings.loadBackgroundScenery) {
+      sceneryTasks.push(this.loadBackgroundScenery());
+    } else {
+      this.assetMessages.push('scenery: mobile disabled');
+    }
+    this.updateAssetStatus();
+    await Promise.all(sceneryTasks);
     this.reset();
     this.vehicleSelectionLocked = false;
     this.startScreen?.classList.remove('start-screen--loading');
@@ -676,6 +729,13 @@ export class RacingGame {
     this.focusCarChoice(this.gamepadInput.selectionIndex);
     this.resize();
     this.animate();
+  }
+
+  applyTextureQuality(texture) {
+    if (!texture) return;
+
+    texture.anisotropy = this.performanceSettings.textureAnisotropy;
+    texture.needsUpdate = true;
   }
 
   loadCharacterAffinity() {
@@ -1088,11 +1148,14 @@ ${opponentMarkers}
     this.renderer = new THREE.WebGLRenderer({
       antialias: this.performanceSettings.antialias,
       powerPreference: 'high-performance',
+      stencil: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.performanceSettings.pixelRatioCap));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.performanceSettings.pixelRatioCap));
     this.renderer.shadowMap.enabled = this.performanceSettings.shadowsEnabled;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = this.performanceSettings.toneMapping
+      ? THREE.ACESFilmicToneMapping
+      : THREE.NoToneMapping;
     this.renderer.toneMappingExposure = 1.24;
     this.viewport.appendChild(this.renderer.domElement);
   }
@@ -1100,7 +1163,9 @@ ${opponentMarkers}
   createScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xb29a76);
-    this.scene.fog = new THREE.Fog(0xb29a76, 190, 470);
+    this.scene.fog = this.performanceSettings.fogEnabled
+      ? new THREE.Fog(0xb29a76, 190, 470)
+      : null;
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 420);
     this.camera.position.set(0, 36, -34);
@@ -1193,8 +1258,13 @@ ${opponentMarkers}
   }
 
   createVehicles() {
+    const fallbackOptions = {
+      shadows: this.performanceSettings.shadowsEnabled,
+      simpleMaterials: this.performanceSettings.simpleVehicleMaterials,
+      tireSegments: this.performanceSettings.fallbackTireSegments,
+    };
     this.playerRoot = new THREE.Group();
-    this.playerVisual = createFallbackCar(0x2d8cff, 0x172235);
+    this.playerVisual = createFallbackCar(0x2d8cff, 0x172235, fallbackOptions);
     this.playerRoot.add(this.playerVisual);
     this.playerRoot.visible = false;
     this.scene.add(this.playerRoot);
@@ -1204,7 +1274,7 @@ ${opponentMarkers}
     for (let i = 0; i < OPPONENT_COUNT; i += 1) {
       const root = new THREE.Group();
       const colors = OPPONENT_FALLBACK_COLORS[i % OPPONENT_FALLBACK_COLORS.length];
-      const visual = createFallbackCar(colors.body, colors.accent);
+      const visual = createFallbackCar(colors.body, colors.accent, fallbackOptions);
       root.add(visual);
       root.visible = false;
       this.scene.add(root);
@@ -1277,7 +1347,10 @@ ${opponentMarkers}
 
     try {
       const gltfScene = await loadGltfScene(path);
-      const model = prepareLoadedCar(gltfScene);
+      const model = prepareLoadedCar(gltfScene, undefined, {
+        shadows: this.performanceSettings.shadowsEnabled,
+        simpleMaterials: this.performanceSettings.simpleVehicleMaterials,
+      });
 
       if (kind === 'player') {
         this.playerVisual = replaceVehicleVisual(vehicleRoot, this.playerVisual, model);
@@ -1762,15 +1835,24 @@ ${opponentMarkers}
       button.classList.toggle('is-selected', button.dataset.carId === vehicle.id);
     });
 
-    await Promise.all([
+    const vehicleLoadTasks = [
       this.loadVehicleModel(vehicle, this.playerRoot, 'player'),
-      ...this.opponentVehicles.map((opponentVehicle, index) => (
-        this.loadVehicleModel(opponentVehicle, this.opponentRoots[index], 'opponent', {
-          index,
-          label: `opponent ${index + 1}`,
-        })
-      )),
-    ]);
+    ];
+    if (this.performanceSettings.loadOpponentVehicleModels) {
+      vehicleLoadTasks.push(
+        ...this.opponentVehicles.map((opponentVehicle, index) => (
+          this.loadVehicleModel(opponentVehicle, this.opponentRoots[index], 'opponent', {
+            index,
+            label: `opponent ${index + 1}`,
+          })
+        )),
+      );
+    } else {
+      this.assetMessages.push('opponents: mobile fallback cars');
+      this.updateAssetStatus();
+    }
+
+    await Promise.all(vehicleLoadTasks);
 
     if (requestId !== this.vehicleLoadRequest) return;
 
@@ -2365,6 +2447,8 @@ ${opponentMarkers}
   }
 
   emitDriftSmoke(delta, lateralSpeed, forwardSpeed, onRoad) {
+    if (this.performanceSettings.maxSmokeParticles <= 0 || this.performanceSettings.smokeEmitScale <= 0) return;
+
     const driftAmount = onRoad
       ? this.player.rearSlip
         * smoothStep(1.1, 6.5, Math.abs(lateralSpeed))
@@ -2394,6 +2478,8 @@ ${opponentMarkers}
   }
 
   spawnSmokePuff(side, driftAmount, lateralSpeed, onRoad) {
+    if (this.performanceSettings.maxSmokeParticles <= 0) return;
+
     if (this.smokeParticles.length >= this.performanceSettings.maxSmokeParticles) {
       this.removeSmokeParticle(0);
     }
@@ -2474,6 +2560,7 @@ ${opponentMarkers}
 
   spawnSandWisp() {
     if (!this.player || !this.sandWispTexture) return;
+    if (this.performanceSettings.maxSandWisps <= 0) return;
     if (this.sandWisps.length >= this.performanceSettings.maxSandWisps) {
       this.removeSandWisp(0);
     }
@@ -2514,6 +2601,7 @@ ${opponentMarkers}
 
   updateAmbientSand(delta) {
     if (!this.player || !this.scene) return;
+    if (this.performanceSettings.maxSandWisps <= 0 || this.performanceSettings.sandWispSpawnRate <= 0) return;
 
     this.sandWispEmitAccumulator += delta * this.performanceSettings.sandWispSpawnRate;
     while (this.sandWispEmitAccumulator >= 1) {
@@ -2569,6 +2657,7 @@ ${opponentMarkers}
 
   spawnTumbleweed() {
     if (!this.tumbleweedPrototype || !this.player) return;
+    if (this.performanceSettings.maxTumbleweeds <= 0) return;
 
     if (this.tumbleweeds.length >= this.performanceSettings.maxTumbleweeds) {
       this.removeTumbleweed(0);
@@ -2606,6 +2695,7 @@ ${opponentMarkers}
 
   updateTumbleweeds(delta) {
     if (!this.tumbleweedPrototype || !this.player) return;
+    if (this.performanceSettings.maxTumbleweeds <= 0) return;
 
     this.tumbleweedSpawnTimer -= delta;
     if (this.tumbleweedSpawnTimer <= 0) {
@@ -3206,7 +3296,15 @@ ${opponentMarkers}
 
   animate() {
     const delta = Math.min(this.clock.getDelta(), 0.033);
-    this.updateGamepadInput();
+    if (this.performanceSettings.gamepadPollInterval > 0) {
+      this.gamepadPollAccumulator += delta;
+      if (this.gamepadPollAccumulator >= this.performanceSettings.gamepadPollInterval) {
+        this.gamepadPollAccumulator = 0;
+        this.updateGamepadInput();
+      }
+    } else {
+      this.updateGamepadInput();
+    }
     if (!this.paused.active) {
       this.updateCountdown();
       this.updateAmbientSand(delta);
@@ -3223,7 +3321,9 @@ ${opponentMarkers}
       }
       this.updateCamera(delta);
       this.updateHud();
-      this.updateCourseMap();
+      if (this.performanceSettings.updateCourseMap) {
+        this.updateCourseMap();
+      }
     }
 
     this.updateCharacterDialogueVisibility();
@@ -3236,6 +3336,7 @@ ${opponentMarkers}
     const height = this.viewport.clientHeight || 1;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.performanceSettings.pixelRatioCap));
     this.renderer.setSize(width, height, false);
   }
 
