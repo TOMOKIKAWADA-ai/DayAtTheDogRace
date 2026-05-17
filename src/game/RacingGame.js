@@ -58,6 +58,20 @@ function createDefaultCharacterAffinity() {
   return Object.fromEntries(RACE_CHARACTERS.map((character) => [character.id, 0]));
 }
 
+function isMobilePerformanceTarget() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+
+  return window.matchMedia('(max-width: 720px), (hover: none) and (pointer: coarse)').matches;
+}
+
+function createPerformanceSettings() {
+  const mobile = isMobilePerformanceTarget();
+  return {
+    ...PERFORMANCE_SETTINGS[mobile ? 'mobile' : 'desktop'],
+    mobile,
+  };
+}
+
 function normalizeCharacterAffinity(source = {}) {
   const defaults = createDefaultCharacterAffinity();
   RACE_CHARACTERS.forEach((character) => {
@@ -194,7 +208,6 @@ const OPPONENT_LINE_LIMIT = TRACK.roadWidth / 2 - 2.2;
 const OPPONENT_TURN_SIDE_SWITCH_THRESHOLD = 0.06;
 const OPPONENT_LINE_CORNER_START = 0.07;
 const OPPONENT_LINE_CORNER_FULL = 0.28;
-const MAX_SMOKE_PARTICLES = 54;
 const OPPONENT_RECOVERY_PULL = 3.25;
 const OPPONENT_KNOCKBACK_DAMPING = 1.9;
 const OPPONENT_RECOVERY_TIME = 2.9;
@@ -243,12 +256,9 @@ const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
 const COURSE_MAP_MARKER_MARGIN = 8;
 const ENGINE_BASE_VOLUME = 0.1;
-const TUMBLEWEED_MAX_COUNT = 6;
 const TUMBLEWEED_VISUAL_SIZE = 3.8;
 const TUMBLEWEED_WIND = new THREE.Vector3(-0.62, 0, 0.78).normalize();
 const SAND_WIND = new THREE.Vector3(-0.66, 0, 0.75).normalize();
-const MAX_SAND_WISPS = 52;
-const SAND_WISP_SPAWN_RATE = 7.5;
 const SAND_WISP_SPAWN_RADIUS = 118;
 const SAND_WISP_DESPAWN_DISTANCE = 168;
 const TUMBLEWEED_SPAWN_DISTANCE = 92;
@@ -272,6 +282,38 @@ const OPPONENT_STARTS = [
   { progress: -START_GRID_PROGRESS_SPACING * 2, speed: 0.032, lineBias: -START_GRID_LANE_OFFSET },
 ];
 const COURSE_SCENERY_COUNT = 84;
+const PERFORMANCE_SETTINGS = {
+  desktop: {
+    antialias: true,
+    pixelRatioCap: 1.5,
+    shadowsEnabled: true,
+    shadowMapSize: 1024,
+    courseSceneryCount: 60,
+    fixedSceneryStep: 1,
+    maxSmokeParticles: 36,
+    smokeEmitScale: 0.78,
+    maxSandWisps: 28,
+    sandWispSpawnRate: 4.2,
+    maxTumbleweeds: 4,
+    tumbleweedSpawnMin: 2.0,
+    tumbleweedSpawnMax: 4.2,
+  },
+  mobile: {
+    antialias: false,
+    pixelRatioCap: 1,
+    shadowsEnabled: false,
+    shadowMapSize: 512,
+    courseSceneryCount: 28,
+    fixedSceneryStep: 2,
+    maxSmokeParticles: 18,
+    smokeEmitScale: 0.45,
+    maxSandWisps: 12,
+    sandWispSpawnRate: 2.2,
+    maxTumbleweeds: 2,
+    tumbleweedSpawnMin: 3.2,
+    tumbleweedSpawnMax: 5.8,
+  },
+};
 const COURSE_SCENERY_MODELS = [
   { modelId: 'plants-01', minHeight: 1.55, maxHeight: 2.25, minOffset: 3.5, maxOffset: 12, tangentJitter: 6 },
   { modelId: 'stone-01', minHeight: 0.76, maxHeight: 1.12, minOffset: 4.5, maxOffset: 13, tangentJitter: 5 },
@@ -405,11 +447,11 @@ function createSandWispTexture() {
   return texture;
 }
 
-function enableObjectShadows(root) {
+function enableObjectShadows(root, { cast = true, receive = true } = {}) {
   root.traverse((child) => {
     if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
+      child.castShadow = cast;
+      child.receiveShadow = receive;
     }
   });
 }
@@ -431,7 +473,7 @@ function removeMaterialGloss(material) {
 
 function prepareTumbleweedVisual(model) {
   const visual = model.clone(true);
-  enableObjectShadows(visual);
+  enableObjectShadows(visual, { cast: false, receive: false });
   visual.traverse((child) => {
     if (child.isMesh) {
       child.material = Array.isArray(child.material)
@@ -463,7 +505,7 @@ function prepareStaticSceneryPrototype(model) {
   const prototype = new THREE.Group();
   const visual = model.clone(true);
 
-  enableObjectShadows(visual);
+  enableObjectShadows(visual, { cast: false, receive: false });
   visual.traverse((child) => {
     if (child.isMesh) {
       child.material = Array.isArray(child.material)
@@ -506,7 +548,7 @@ function createFallbackTumbleweedVisual() {
     visual.add(branch);
   }
 
-  enableObjectShadows(visual);
+  enableObjectShadows(visual, { cast: false, receive: false });
   visual.userData.radius = 2.4;
   return visual;
 }
@@ -530,6 +572,7 @@ export class RacingGame {
     this.raceFinished = false;
     this.vehicleLoadRequest = 0;
     this.vehicleSelectionLocked = true;
+    this.performanceSettings = createPerformanceSettings();
     this.selectedVehicle = ASSETS.models.vehicles[0];
     this.opponentVehicles = this.pickOpponentVehicles(this.selectedVehicle);
     this.characterAffinity = this.loadCharacterAffinity();
@@ -724,10 +767,8 @@ export class RacingGame {
   updateCharacterPanel(expression = 'neutral') {
     if (!this.characterComms?.root || !this.activeCharacter) return;
 
-    const affinity = this.getActiveCharacterAffinity();
     const portrait = this.getCharacterPortrait(expression);
     this.characterComms.name.textContent = this.activeCharacter.name;
-    this.characterComms.affinity.textContent = `BOND ${affinity}/${CHARACTER_AFFECTION_MAX}`;
     this.characterComms.portrait.src = portrait;
     this.characterComms.portrait.alt = this.activeCharacter.name;
   }
@@ -874,7 +915,6 @@ ${opponentMarkers}
           <div class="character-copy">
             <div class="character-meta">
               <span data-character-name>Rival</span>
-              <span data-character-affinity>BOND 0/${CHARACTER_AFFECTION_MAX}</span>
             </div>
             <p class="character-line" data-character-line></p>
           </div>
@@ -1026,7 +1066,6 @@ ${opponentMarkers}
       root: this.root.querySelector('[data-character-comms]'),
       portrait: this.root.querySelector('[data-character-portrait]'),
       name: this.root.querySelector('[data-character-name]'),
-      affinity: this.root.querySelector('[data-character-affinity]'),
       line: this.root.querySelector('[data-character-line]'),
     };
     this.finishCharacter = {
@@ -1046,10 +1085,13 @@ ${opponentMarkers}
   }
 
   createRenderer() {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: this.performanceSettings.antialias,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.performanceSettings.pixelRatioCap));
+    this.renderer.shadowMap.enabled = this.performanceSettings.shadowsEnabled;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.24;
     this.viewport.appendChild(this.renderer.domElement);
@@ -1068,8 +1110,8 @@ ${opponentMarkers}
 
     const sun = new THREE.DirectionalLight(0xffe7ba, 2.55);
     sun.position.set(-38, 72, -46);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.castShadow = this.performanceSettings.shadowsEnabled;
+    sun.shadow.mapSize.set(this.performanceSettings.shadowMapSize, this.performanceSettings.shadowMapSize);
     sun.shadow.camera.left = -285;
     sun.shadow.camera.right = 285;
     sun.shadow.camera.top = 245;
@@ -1286,8 +1328,10 @@ ${opponentMarkers}
         .filter(Boolean)
         .map(([id, model]) => [id, prepareStaticSceneryPrototype(model)]),
     );
+    const fixedPlacements = BACKGROUND_SCENERY_PLACEMENTS
+      .filter((_, index) => index % this.performanceSettings.fixedSceneryStep === 0);
     const placements = [
-      ...BACKGROUND_SCENERY_PLACEMENTS,
+      ...fixedPlacements,
       ...this.createCourseSceneryPlacements(),
     ];
     const root = new THREE.Group();
@@ -1326,10 +1370,11 @@ ${opponentMarkers}
     const placements = [];
     const roadEdgeDistance = TRACK.roadWidth / 2 + TRACK.shoulderWidth;
 
-    for (let i = 0; i < COURSE_SCENERY_COUNT; i += 1) {
+    const sceneryCount = Math.min(COURSE_SCENERY_COUNT, this.performanceSettings.courseSceneryCount);
+    for (let i = 0; i < sceneryCount; i += 1) {
       const model = COURSE_SCENERY_MODELS[i % COURSE_SCENERY_MODELS.length];
       const side = i % 4 < 2 ? 1 : -1;
-      const progress = THREE.MathUtils.euclideanModulo((i + randomRange(random, -0.18, 0.18)) / COURSE_SCENERY_COUNT, 1);
+      const progress = THREE.MathUtils.euclideanModulo((i + randomRange(random, -0.18, 0.18)) / sceneryCount, 1);
       const pose = this.getTrackPose(progress);
       const distance = roadEdgeDistance + randomRange(random, model.minOffset, model.maxOffset);
       const tangentOffset = randomRange(random, -model.tangentJitter, model.tangentJitter);
@@ -2334,7 +2379,9 @@ ${opponentMarkers}
       return;
     }
 
-    this.smokeEmitAccumulator += delta * THREE.MathUtils.lerp(5, 16, driftAmount);
+    this.smokeEmitAccumulator += delta
+      * THREE.MathUtils.lerp(5, 16, driftAmount)
+      * this.performanceSettings.smokeEmitScale;
     while (this.smokeEmitAccumulator >= 1) {
       this.smokeEmitAccumulator -= 1;
       const side = Math.random() < 0.5 ? -1 : 1;
@@ -2347,7 +2394,7 @@ ${opponentMarkers}
   }
 
   spawnSmokePuff(side, driftAmount, lateralSpeed, onRoad) {
-    if (this.smokeParticles.length >= MAX_SMOKE_PARTICLES) {
+    if (this.smokeParticles.length >= this.performanceSettings.maxSmokeParticles) {
       this.removeSmokeParticle(0);
     }
 
@@ -2427,7 +2474,7 @@ ${opponentMarkers}
 
   spawnSandWisp() {
     if (!this.player || !this.sandWispTexture) return;
-    if (this.sandWisps.length >= MAX_SAND_WISPS) {
+    if (this.sandWisps.length >= this.performanceSettings.maxSandWisps) {
       this.removeSandWisp(0);
     }
 
@@ -2468,7 +2515,7 @@ ${opponentMarkers}
   updateAmbientSand(delta) {
     if (!this.player || !this.scene) return;
 
-    this.sandWispEmitAccumulator += delta * SAND_WISP_SPAWN_RATE;
+    this.sandWispEmitAccumulator += delta * this.performanceSettings.sandWispSpawnRate;
     while (this.sandWispEmitAccumulator >= 1) {
       this.sandWispEmitAccumulator -= 1;
       this.spawnSandWisp();
@@ -2523,7 +2570,7 @@ ${opponentMarkers}
   spawnTumbleweed() {
     if (!this.tumbleweedPrototype || !this.player) return;
 
-    if (this.tumbleweeds.length >= TUMBLEWEED_MAX_COUNT) {
+    if (this.tumbleweeds.length >= this.performanceSettings.maxTumbleweeds) {
       this.removeTumbleweed(0);
     }
 
@@ -2563,7 +2610,11 @@ ${opponentMarkers}
     this.tumbleweedSpawnTimer -= delta;
     if (this.tumbleweedSpawnTimer <= 0) {
       this.spawnTumbleweed();
-      this.tumbleweedSpawnTimer = THREE.MathUtils.lerp(1.4, 3.1, Math.random());
+      this.tumbleweedSpawnTimer = THREE.MathUtils.lerp(
+        this.performanceSettings.tumbleweedSpawnMin,
+        this.performanceSettings.tumbleweedSpawnMax,
+        Math.random(),
+      );
     }
 
     for (let i = this.tumbleweeds.length - 1; i >= 0; i -= 1) {
@@ -2722,7 +2773,7 @@ ${opponentMarkers}
     const portrait = this.getCharacterPortrait(expression);
 
     this.finishCharacter.root.classList.toggle('is-player-win', playerWon);
-    this.finishCharacter.name.textContent = `${this.activeCharacter.name}  BOND ${this.getActiveCharacterAffinity()}/${CHARACTER_AFFECTION_MAX}`;
+    this.finishCharacter.name.textContent = this.activeCharacter.name;
     this.finishCharacter.line.textContent = line;
     this.finishCharacter.portrait.src = portrait;
     this.finishCharacter.portrait.alt = this.activeCharacter.name;

@@ -1490,6 +1490,27 @@ body {
     grid-column: 1;
   }
 
+  .pause-toggle,
+  .game-shell.is-race-interface-active .mobile-race-hud,
+  .character-copy,
+  .start-screen,
+  .finish-screen,
+  .pause-screen {
+    backdrop-filter: none;
+  }
+
+  .touch-stick-base,
+  .touch-stick-thumb,
+  .touch-button img,
+  .character-portrait img,
+  .finish-character-portrait img {
+    filter: none;
+  }
+
+  .touch-button.is-pressed img {
+    filter: brightness(1.12);
+  }
+
   .help {
     top: auto;
     right: 10px;
