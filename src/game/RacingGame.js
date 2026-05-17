@@ -200,7 +200,7 @@ const PLAYER_FRONT_AXLE_OFFSET = 1.8 * VEHICLE_GRAPHIC_SCALE;
 const PLAYER_FRONT_AXLE_PIVOT_STRENGTH = 0.82;
 const OPPONENT_MAX_SPEED = 0.046;
 const OPPONENT_MIN_CORNER_SPEED = 0.016;
-const OPPONENT_COUNT = 3;
+const DEFAULT_OPPONENT_COUNT = 3;
 const OPPONENT_OUTSIDE_LINE_OFFSET = TRACK.roadWidth * 0.2;
 const OPPONENT_INSIDE_LINE_OFFSET = TRACK.roadWidth * 0.18;
 const OPPONENT_LINE_SHIFT_SPEED = 4.8;
@@ -250,7 +250,6 @@ const CHARACTER_STUCK_OFFROAD_SECONDS = 2.6;
 const CHARACTER_OPPONENT_INDEX = 0;
 const START_GRID_LANE_OFFSET = 4.7;
 const START_GRID_PROGRESS_SPACING = 0.018;
-const PLAYER_GRID_PROGRESS = -START_GRID_PROGRESS_SPACING * OPPONENT_COUNT;
 const PLAYER_GRID_LINE_OFFSET = START_GRID_LANE_OFFSET;
 const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
@@ -284,6 +283,8 @@ const OPPONENT_STARTS = [
 const COURSE_SCENERY_COUNT = 84;
 const PERFORMANCE_SETTINGS = {
   desktop: {
+    opponentCount: DEFAULT_OPPONENT_COUNT,
+    opponentVehicleOverride: null,
     antialias: true,
     pixelRatioCap: 1.5,
     toneMapping: true,
@@ -314,6 +315,8 @@ const PERFORMANCE_SETTINGS = {
     gamepadPollInterval: 0,
   },
   mobile: {
+    opponentCount: 1,
+    opponentVehicleOverride: ASSETS.models.mobileOpponent,
     antialias: false,
     pixelRatioCap: 0.75,
     toneMapping: false,
@@ -328,7 +331,7 @@ const PERFORMANCE_SETTINGS = {
     loadHdriEnvironment: false,
     loadBackgroundScenery: false,
     loadTumbleweed: false,
-    loadOpponentVehicleModels: false,
+    loadOpponentVehicleModels: true,
     simpleVehicleMaterials: true,
     fallbackTireSegments: 10,
     courseSceneryCount: 0,
@@ -917,7 +920,7 @@ export class RacingGame {
         </button>
       `)
       .join('');
-    const opponentMarkers = Array.from({ length: OPPONENT_COUNT }, (_, index) => `
+    const opponentMarkers = Array.from({ length: this.getOpponentCount() }, (_, index) => `
             <g class="course-map-marker course-map-marker-opponent" data-map-opponent="${index}">
               <path d="M 0 -5 L 4.5 6 L 0 3 L -4.5 6 Z"></path>
             </g>
@@ -1258,6 +1261,7 @@ ${opponentMarkers}
   }
 
   createVehicles() {
+    const opponentCount = this.getOpponentCount();
     const fallbackOptions = {
       shadows: this.performanceSettings.shadowsEnabled,
       simpleMaterials: this.performanceSettings.simpleVehicleMaterials,
@@ -1271,7 +1275,7 @@ ${opponentMarkers}
 
     this.opponentRoots = [];
     this.opponentVisuals = [];
-    for (let i = 0; i < OPPONENT_COUNT; i += 1) {
+    for (let i = 0; i < opponentCount; i += 1) {
       const root = new THREE.Group();
       const colors = OPPONENT_FALLBACK_COLORS[i % OPPONENT_FALLBACK_COLORS.length];
       const visual = createFallbackCar(colors.body, colors.accent, fallbackOptions);
@@ -1469,10 +1473,30 @@ ${opponentMarkers}
   }
 
   pickOpponentVehicles(selectedVehicle) {
+    const opponentCount = this.getOpponentCount();
+    if (this.performanceSettings.opponentVehicleOverride) {
+      return Array.from({ length: opponentCount }, () => this.performanceSettings.opponentVehicleOverride);
+    }
+
     const alternatives = ASSETS.models.vehicles.filter((vehicle) => vehicle.id !== selectedVehicle.id);
     const pool = alternatives.length > 0 ? alternatives : ASSETS.models.vehicles;
     const startIndex = Math.floor(Math.random() * pool.length);
-    return Array.from({ length: OPPONENT_COUNT }, (_, index) => pool[(startIndex + index) % pool.length]);
+    return Array.from({ length: opponentCount }, (_, index) => pool[(startIndex + index) % pool.length]);
+  }
+
+  getOpponentCount() {
+    return Math.max(1, this.performanceSettings.opponentCount ?? DEFAULT_OPPONENT_COUNT);
+  }
+
+  getOpponentStarts() {
+    const opponentCount = this.getOpponentCount();
+    return Array.from({ length: opponentCount }, (_, index) => (
+      OPPONENT_STARTS[index] ?? {
+        progress: -START_GRID_PROGRESS_SPACING * index,
+        speed: Math.max(0.03, 0.035 - index * 0.002),
+        lineBias: index % 2 === 0 ? -START_GRID_LANE_OFFSET : START_GRID_LANE_OFFSET,
+      }
+    ));
   }
 
   getPlayerStartPose() {
@@ -1487,7 +1511,8 @@ ${opponentMarkers}
       };
     }
 
-    const pose = this.getTrackPose(PLAYER_GRID_PROGRESS);
+    const playerGridProgress = -START_GRID_PROGRESS_SPACING * this.getOpponentCount();
+    const pose = this.getTrackPose(playerGridProgress);
     const point = pose.point.clone().addScaledVector(pose.normal, PLAYER_GRID_LINE_OFFSET);
     point.y = this.getSurfaceY(point.x, point.z);
 
@@ -1497,7 +1522,7 @@ ${opponentMarkers}
       z: point.z,
       heading: pose.heading,
       progress: this.track.getProgress(point.x, point.z),
-      unwrappedProgress: PLAYER_GRID_PROGRESS,
+      unwrappedProgress: playerGridProgress,
     };
   }
 
@@ -2036,7 +2061,7 @@ ${opponentMarkers}
       surface: 'road',
       slipstream: 0,
     };
-    this.opponents = OPPONENT_STARTS.map((start, index) => ({
+    this.opponents = this.getOpponentStarts().map((start, index) => ({
       ...start,
       index,
       name: OPPONENT_NAMES[index] ?? `RIVAL ${index + 1}`,
@@ -2844,7 +2869,7 @@ ${opponentMarkers}
     if (this.finishTitle) {
       this.finishTitle.textContent = playerWon ? 'You Won The Race' : `${ordinalPlace(playerRank)} Place Finish`;
     }
-    this.finishStats.result.textContent = playerWon ? 'WIN' : `${playerRank}/${OPPONENT_COUNT + 1}`;
+    this.finishStats.result.textContent = playerWon ? 'WIN' : `${playerRank}/${this.getOpponentCount() + 1}`;
     this.finishStats.total.textContent = formatLapTime(totalTime);
     this.finishStats.best.textContent = formatLapTime(this.player.bestLap);
     this.finishStats.nitro.textContent = `${Math.round(this.player.nitro * 100)}%`;

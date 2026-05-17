@@ -6,6 +6,7 @@ export const ASSETS = {
       { id: 'car-3', name: 'Canyon Royale', path: '/assets/models/car-3.glb', sideImage: '/assets/ui/cars/car-003-side.png?v=1' },
       { id: 'car-4', name: 'County Pursuit', path: '/assets/models/car-4.glb', sideImage: '/assets/ui/cars/car-004-side.png?v=1' },
     ],
+    mobileOpponent: { id: 'car-sp', name: 'SP Rival', path: '/assets/models/car_SP.glb' },
     tumbleweed: { id: 'tumbleweed-1', name: 'Tumbleweed', path: '/assets/models/Tumbleweed3.glb' },
     scenery: [
       { id: 'plants-01', name: 'Plants 01', path: '/assets/models/scenery/plants_01.glb' },
