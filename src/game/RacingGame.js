@@ -104,6 +104,15 @@ function normalizeInputKey(event) {
   return event.code === 'Space' ? 'space' : event.key.toLowerCase();
 }
 
+const TITLE_ART_URL = '/assets/ui/title/title-01-lineart.png?v=1';
+const TITLE_SYNOPSIS = [
+  '古いハイウェイ沿いの小さな町では、速いやつが一番マブい。',
+  'レースで勝てば店では顔が利き、モーテルの前では名前を呼ばれ、女の子たちにも少しだけモテる。',
+  'Rita、Nina、Annie Roseの3人も、そんな町のレースに飛び込んでいく。',
+  '理由は大げさじゃない。かっこいいと思われたい。あいつに負けたくない。そして、ちょっとだけモテたい。',
+  '夕暮れの一本道、古いガソリンスタンド、砂をかぶったアメ車。町いちばんの人気者を目指して、今日もレースが始まる。',
+];
+
 function applyGamepadDeadzone(value, deadzone = 0.18) {
   const magnitude = Math.abs(value);
   if (magnitude < deadzone) return 0;
@@ -255,7 +264,7 @@ const COURSE_MAP_SIZE = 240;
 const COURSE_MAP_PADDING = 18;
 const COURSE_MAP_MARKER_MARGIN = 8;
 const ENGINE_BASE_VOLUME = 0.1;
-const TUMBLEWEED_VISUAL_SIZE = 3.8;
+const TUMBLEWEED_VISUAL_SIZE = 2.5;
 const TUMBLEWEED_WIND = new THREE.Vector3(-0.62, 0, 0.78).normalize();
 const SAND_WIND = new THREE.Vector3(-0.66, 0, 0.75).normalize();
 const SAND_WISP_SPAWN_RADIUS = 118;
@@ -911,6 +920,9 @@ export class RacingGame {
   }
 
   createLayout() {
+    const titleStory = TITLE_SYNOPSIS
+      .map((line) => `<p>${line}</p>`)
+      .join('');
     const vehicleButtons = ASSETS.models.vehicles
       .map((vehicle, index) => `
         <button class="car-choice" type="button" data-car-id="${vehicle.id}" disabled>
@@ -1046,8 +1058,18 @@ ${opponentMarkers}
         </section>
         <section class="start-screen start-screen--loading" data-start-screen aria-label="car selection">
           <div class="start-panel">
-            <p class="start-kicker">DAY OF THE DOG RACE</p>
-            <h2 class="start-title">Choose Your Car</h2>
+            <div class="title-showcase">
+              <figure class="title-art">
+                <img src="${TITLE_ART_URL}" alt="DAY OF THE DOG RACE title art" draggable="false" />
+              </figure>
+              <div class="title-story" aria-label="あらすじ">
+                ${titleStory}
+              </div>
+            </div>
+            <div class="start-selection-header">
+              <p class="start-kicker">SELECT YOUR RIDE</p>
+              <h2 class="start-title">Choose Your Car</h2>
+            </div>
             <div class="car-picker" data-car-picker>${vehicleButtons}</div>
             ${startControls}
           </div>
